@@ -1,0 +1,21 @@
+{
+  "users": [
+    {
+      "id": "codexy-admin",
+      "name": "Administrador Codexy",
+      "role": "Administrador",
+      "username": "codexy@admin",
+      "password": "codexy@2025",
+      "status": "active",
+      "evolutionInstanceName": "codexy_prospect_codexy_admin"
+    }
+  ],
+  "campaigns": [],
+  "searchRuns": [],
+  "leadPool": [],
+  "assignments": [],
+  "messages": [],
+  "followUps": [],
+  "activityLog": [],
+  "searchCache": {}
+}

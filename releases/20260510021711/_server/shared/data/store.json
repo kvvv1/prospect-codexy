@@ -1,0 +1,78 @@
+{
+  "users": [
+    {
+      "id": "codexy-admin",
+      "name": "Administrador Codexy",
+      "role": "Administrador",
+      "username": "codexy@admin",
+      "password": "codexy@2025",
+      "status": "active",
+      "evolutionInstanceName": "codexy_prospect_codexy_admin"
+    }
+  ],
+  "campaigns": [],
+  "leads": [
+    {
+      "id": "lead_moxt3465_7oxhix",
+      "ownerId": "codexy-admin",
+      "stage": "Qualificado",
+      "approach": "Oi, tudo bem? Aqui é da Codexy. Encontrei a undefined pelo Google e não encontrei um site próprio para captar contatos de forma mais profissional. A gente ajuda empresas como a de vocês a transformar visitas do Google e Instagram em pedidos de orçamento pelo WhatsApp. Posso te mandar uma ideia rápida de como isso ficaria para a undefined?",
+      "followUps": [
+        "Passando só para complementar: a ideia não é trocar o WhatsApp de vocês, é criar uma página simples que explique melhor a oferta e leve o cliente direto para conversar com vocês. Faz sentido eu te mostrar um exemplo?",
+        "Vi que muitos clientes pesquisam antes de chamar no WhatsApp. Uma página bem feita pode ajudar a passar mais confiança e aumentar os contatos. Quer que eu te mande um modelo aplicado ao nicho de undefined?",
+        "Última mensagem para não te incomodar: se melhorar a presença digital for prioridade depois, posso montar um diagnóstico rápido da undefined sem custo. Posso deixar isso separado para você?"
+      ],
+      "history": [
+        {
+          "at": "2026-05-09T03:50:24.221Z",
+          "type": "created",
+          "text": "Oportunidade salva no pipeline."
+        }
+      ]
+    },
+    {
+      "name": "Clínica São Miguel",
+      "category": "Clinicas de estetica",
+      "city": "Belo Horizonte",
+      "phone": "5531995531183",
+      "rating": 4.7,
+      "reviews": 82,
+      "website": "",
+      "instagram": "@clinicasaomiguel",
+      "id": "lead_moxt4brc_kgeljz",
+      "source": "mock",
+      "opportunity": "sem-site",
+      "product": "Landing Pages",
+      "score": 98,
+      "pain": "Depende do Google/Instagram, mas não tem uma página própria para converter interessados.",
+      "stage": "Encontrado",
+      "createdAt": "2026-05-09T03:51:20.403Z",
+      "ownerId": "codexy-admin",
+      "approach": "Oi, tudo bem? Aqui é da Codexy. Encontrei a Clínica São Miguel em Belo Horizonte pelo Google e não encontrei um site próprio para captar contatos de forma mais profissional. A gente ajuda empresas como a de vocês a transformar visitas do Google e Instagram em pedidos de orçamento pelo WhatsApp. Posso te mandar uma ideia rápida de como isso ficaria para a Clínica São Miguel?",
+      "followUps": [
+        "Passando só para complementar: a ideia não é trocar o WhatsApp de vocês, é criar uma página simples que explique melhor a oferta e leve o cliente direto para conversar com vocês. Faz sentido eu te mostrar um exemplo?",
+        "Vi que muitos clientes pesquisam antes de chamar no WhatsApp. Uma página bem feita pode ajudar a passar mais confiança e aumentar os contatos. Quer que eu te mande um modelo aplicado ao nicho de Clinicas de estetica?",
+        "Última mensagem para não te incomodar: se melhorar a presença digital for prioridade depois, posso montar um diagnóstico rápido da Clínica São Miguel sem custo. Posso deixar isso separado para você?"
+      ],
+      "history": [
+        {
+          "at": "2026-05-09T03:51:20.712Z",
+          "type": "created",
+          "text": "Oportunidade salva no pipeline."
+        }
+      ]
+    }
+  ],
+  "messages": [
+    {
+      "id": "msg_moxrirus_mb4osj",
+      "leadId": null,
+      "number": "5531995531183",
+      "text": "Teste Codexy Prospect: integração inicial da ferramenta de prospecção com WhatsApp via Evolution API.",
+      "status": "sent",
+      "simulated": false,
+      "providerStatus": 201,
+      "createdAt": "2026-05-09T03:06:35.524Z"
+    }
+  ]
+}

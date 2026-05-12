@@ -1,0 +1,127 @@
+{
+  "console": [],
+  "pageErrors": [],
+  "requestsFailed": [],
+  "responses": [
+    {
+      "url": "https://prospect.codexy.com.br/",
+      "status": 200,
+      "contentType": "text/html"
+    },
+    {
+      "url": "https://prospect.codexy.com.br/assets/index-CEMw7aXW.css",
+      "status": 200,
+      "contentType": "text/css"
+    },
+    {
+      "url": "https://prospect.codexy.com.br/assets/index-j9zhgycI.js",
+      "status": 200,
+      "contentType": "application/javascript"
+    },
+    {
+      "url": "https://prospect.codexy.com.br/api/auth/session",
+      "status": 200,
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "url": "https://prospect.codexy.com.br/codexy-logo.png",
+      "status": 200,
+      "contentType": "image/png"
+    },
+    {
+      "url": "https://prospect.codexy.com.br/api/auth/login",
+      "status": 200,
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "url": "https://prospect.codexy.com.br/api/dashboard",
+      "status": 200,
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "url": "https://prospect.codexy.com.br/api/leads/approval",
+      "status": 200,
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "url": "https://prospect.codexy.com.br/api/leads/pool",
+      "status": 200,
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "url": "https://prospect.codexy.com.br/api/crm",
+      "status": 200,
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "url": "https://prospect.codexy.com.br/api/follow-ups",
+      "status": 200,
+      "contentType": "application/json; charset=utf-8"
+    },
+    {
+      "url": "https://prospect.codexy.com.br/api/users/me/whatsapp",
+      "status": 200,
+      "contentType": "application/json; charset=utf-8"
+    }
+  ],
+  "snapshots": [
+    {
+      "name": "01-initial",
+      "file": "C:\\Users\\KV\\Documents\\Projetos\\prospect.codexy\\playwright-report\\01-initial.png",
+      "state": {
+        "url": "https://prospect.codexy.com.br/",
+        "title": "Codexy Prospect",
+        "bodyText": "PROSPECT\nSistema diário de prospecção comercial\n\nCrie buscas inteligentes, aprove leads manualmente e mantenha cada vendedor focado nos próprios atendimentos ativos.\n\nACESSO INTERNO\nEntrar no Prospect\nUsuário\nSenha\nEntrar",
+        "rootHtml": "<main class=\"login-screen\"><section class=\"login-visual\"><div class=\"brand\"><img alt=\"Codexy\" src=\"/codexy-logo.png\"><span>Prospect</span></div><h1>Sistema diário de prospecção comercial</h1><p>Crie buscas inteligentes, aprove leads manualmente e mantenha cada vendedor focado nos próprios atendimentos ativos.</p></section><form class=\"login-card\"><div><span class=\"product-label\">Acesso interno</span><h2>Entrar no Prospect</h2></div><label>Usuário<input autocomplete=\"username\" value=\"\" style=\"\"></label><label>Senha<input autocomplete=\"current-password\" type=\"password\" value=\"\" style=\"\"></label><button class=\"primary-button\" type=\"submit\">Entrar</button></form></main>",
+        "rootChildCount": 1,
+        "background": "rgba(0, 0, 0, 0)",
+        "scripts": [
+          "https://prospect.codexy.com.br/assets/index-j9zhgycI.js"
+        ],
+        "styles": [
+          "https://prospect.codexy.com.br/assets/index-CEMw7aXW.css"
+        ]
+      }
+    },
+    {
+      "name": "02-login-filled",
+      "file": "C:\\Users\\KV\\Documents\\Projetos\\prospect.codexy\\playwright-report\\02-login-filled.png",
+      "state": {
+        "url": "https://prospect.codexy.com.br/",
+        "title": "Codexy Prospect",
+        "bodyText": "PROSPECT\nSistema diário de prospecção comercial\n\nCrie buscas inteligentes, aprove leads manualmente e mantenha cada vendedor focado nos próprios atendimentos ativos.\n\nACESSO INTERNO\nEntrar no Prospect\nUsuário\nSenha\nEntrar",
+        "rootHtml": "<main class=\"login-screen\"><section class=\"login-visual\"><div class=\"brand\"><img alt=\"Codexy\" src=\"/codexy-logo.png\"><span>Prospect</span></div><h1>Sistema diário de prospecção comercial</h1><p>Crie buscas inteligentes, aprove leads manualmente e mantenha cada vendedor focado nos próprios atendimentos ativos.</p></section><form class=\"login-card\"><div><span class=\"product-label\">Acesso interno</span><h2>Entrar no Prospect</h2></div><label>Usuário<input autocomplete=\"username\" value=\"codexy@admin\" style=\"\"></label><label>Senha<input autocomplete=\"current-password\" type=\"password\" value=\"codexy@2025\" style=\"\"></label><button class=\"primary-button\" type=\"submit\">Entrar</button></form></main>",
+        "rootChildCount": 1,
+        "background": "rgba(0, 0, 0, 0)",
+        "scripts": [
+          "https://prospect.codexy.com.br/assets/index-j9zhgycI.js"
+        ],
+        "styles": [
+          "https://prospect.codexy.com.br/assets/index-CEMw7aXW.css"
+        ]
+      }
+    },
+    {
+      "name": "03-after-login",
+      "file": "C:\\Users\\KV\\Documents\\Projetos\\prospect.codexy\\playwright-report\\03-after-login.png",
+      "state": {
+        "url": "https://prospect.codexy.com.br/",
+        "title": "Codexy Prospect",
+        "bodyText": "PROSPECT\nLogado como\nAdministrador Codexy\nAdministrador\nSair\nMeu Dia\nCriar Prospecção\nAprovação (0)\nBase Geral (0)\nMeu CRM\nFollow-ups (0)\nWhatsApp\nAdmin\nCODEXY PROSPECT\nMeu Dia, Administrador\n\nComece pelo que precisa de ação hoje.\n\nPronto.\nCRM ativo\n0\nAprovação\n0\nBase Geral\n0\nFollow-ups\n0\nEnviadas\n0\nPróxima melhor ação\n\nO sistema prioriza o que move o dia comercial.\n\nCriar nova prospecção\nCriar prospecção\nVer follow-ups\nAprovar leads\nFila de hoje\n\nResumo operacional.\n\nFollow-ups atrasados\n0\nVencem hoje\n0\nLeads para aprovar\n0\nDisponíveis na base\n0\nCRM ativo\n\nAtendimentos que estão com você.\n\nNenhum lead ativo ainda.\nFollow-ups urgentes\n\nEvite que leads mornos esfriem.\n\nSem follow-ups pendentes.",
+        "rootHtml": "<main class=\"app-shell\"><aside class=\"sidebar\"><div class=\"brand\"><img alt=\"Codexy\" src=\"/codexy-logo.png\"><span>Prospect</span></div><div class=\"user-card\"><span>Logado como</span><strong>Administrador Codexy</strong><small>Administrador</small><button type=\"button\">Sair</button></div><nav><button class=\"active\" type=\"button\">Meu Dia</button><button class=\"\" type=\"button\">Criar Prospecção</button><button class=\"\" type=\"button\">Aprovação (0)</button><button class=\"\" type=\"button\">Base Geral (0)</button><button class=\"\" type=\"button\">Meu CRM</button><button class=\"\" type=\"button\">Follow-ups (0)</button><button class=\"\" type=\"button\">WhatsApp</button><button class=\"\" type=\"button\">Admin</button></nav></aside><section class=\"workspace\"><header class=\"topbar\"><div><span class=\"product-label\">Codexy Prospect</span><h1>Meu Dia, Administrador</h1><p>Comece pelo que precisa de ação hoje.</p></div><div class=\"status-pill\">Pronto.</div></header><section class=\"metrics\"><article class=\"metric\"><span>CRM ativo</span><strong>0</strong></article><article class=\"metric\"><span>Aprovação</span><strong>0</strong></article><article class=\"metric\"><span>Base Geral</span><strong>0</strong></article><article class=\"metric\"><span>Follow-ups</span><strong>0</strong></article><article class=\"metric\"><span>Enviadas</span><strong>0</strong></article></section><section class=\"content-grid\"><article class=\"panel wide\"><div class=\"panel-title\"><div><h2>Próxima melhor ação</h2><p>O sistema prioriza o que move o dia comercial.</p></div></div><div class=\"daily-action\"><strong>Criar nova prospecção</strong><div class=\"button-row\"><button class=\"primary-button\" type=\"button\">Criar prospecção</button><button class=\"ghost-button\" type=\"button\">Ver follow-ups</button><button class=\"ghost-button\" type=\"button\">Aprovar leads</button></div></div></article><article class=\"panel\"><div class=\"panel-title\"><div><h2>Fila de hoje</h2><p>Resumo operacional.</p></div></div><div class=\"info-list\"><div><span>Follow-ups atrasados</span><strong>0</strong></div><div><span>Vencem hoje</span><strong>0</strong></div><div><span>Leads para aprovar</span><strong>0</strong></div><div><span>Disponíveis na base</span><strong>0</strong></div></div></article><article class=\"panel\"><div class=\"panel-title\"><div><h2>CRM ativo</h2><p>Atendimentos que estão com você.</p></div></div><div class=\"stack\"><div class=\"empty-state\">Nenhum lead ativo ainda.</div></div></article><article class=\"panel wide\"><div class=\"panel-title\"><div><h2>Follow-ups urgentes</h2><p>Evite que leads mornos esfriem.</p></div></div><div class=\"lead-table\"><div class=\"empty-state\">Sem follow-ups pendentes.</div></div></article></section></section></main>",
+        "rootChildCount": 1,
+        "background": "rgba(0, 0, 0, 0)",
+        "scripts": [
+          "https://prospect.codexy.com.br/assets/index-j9zhgycI.js"
+        ],
+        "styles": [
+          "https://prospect.codexy.com.br/assets/index-CEMw7aXW.css"
+        ]
+      }
+    }
+  ],
+  "initialCounts": {
+    "inputs": 2,
+    "buttons": 1
+  }
+}
