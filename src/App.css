@@ -904,7 +904,7 @@ button:disabled {
   gap: 4px;
 }
 
-.tag-nicho, .tag-city, .tag-phone, .tag-no-site {
+.tag-nicho, .tag-city, .tag-phone, .tag-no-site, .tag-trojan {
   display: inline-block;
   padding: 1px 7px;
   border-radius: 4px;
@@ -916,6 +916,7 @@ button:disabled {
 .tag-city { background: #1a2233; color: #7a8fa6; }
 .tag-phone { background: #0e2e1a; color: #4ade80; }
 .tag-no-site { background: #2a1a12; color: #fb923c; }
+.tag-trojan { background: #2a1a3a; color: #c084fc; }
 
 .lead-row-advice {
   font-size: 0.75rem;
@@ -1349,6 +1350,58 @@ button:disabled {
 .ws-dot.unknown { background: #3a4f6a; }
 
 /* ── Admin UI ── */
+.admin-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.admin-tabs button {
+  min-height: 36px;
+  border: 1px solid #2a374a;
+  border-radius: 7px;
+  padding: 0 14px;
+  background: #111722;
+  color: #bdc7d5;
+  font: 900 13px/1 var(--font);
+}
+
+.admin-tabs button.active,
+.admin-tabs button:hover {
+  border-color: #1f6fff;
+  background: #153761;
+  color: #ffffff;
+}
+
+.trojan-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.72fr);
+}
+
+.trojan-hero .form-success,
+.trojan-hero .form-error {
+  margin-top: 12px;
+}
+
+.trojan-leads {
+  max-height: 620px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.trojan-source-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.trojan-message-stack {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
 .btn-primary {
   min-height: 42px;
   border-radius: 7px;
@@ -1641,6 +1694,32 @@ button:disabled {
   color: #4a8fff !important;
   text-transform: none !important;
   letter-spacing: 0 !important;
+}
+
+.kanban-col-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.kanban-export-btn {
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: #4a8fff;
+  background: transparent;
+  border: 1px solid #1f3a5f;
+  border-radius: 4px;
+  padding: 1px 6px;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.15s, border-color 0.15s;
+  line-height: 1.6;
+}
+
+.kanban-col-header:hover .kanban-export-btn,
+.kanban-export-btn:hover {
+  opacity: 1;
+  border-color: #4a8fff;
 }
 
 .kanban-col-body {

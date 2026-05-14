@@ -666,6 +666,125 @@ app.delete('/api/admin/users/:id', requireAuth, async (req, res) => {
   res.json({ ok: true })
 })
 
+app.get('/api/admin/trojan/leads', requireAuth, async (req, res) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Acesso restrito a administradores.' })
+  const store = await readStore()
+  const trojanLeadIds = new Set(store.messages.filter((m) => m.source === 'trojan').map((m) => m.leadId).filter(Boolean))
+  const approvedLeadIds = new Set(store.assignments.filter((a) => a.status === 'active').map((a) => a.leadId))
+  const leads = store.leadPool
+    .filter((lead) => lead.phone)
+    .sort((a, b) => (b.score || 0) - (a.score || 0))
+    .map((lead) => ({ ...leadListView(store, lead), hasTrojan: trojanLeadIds.has(lead.id), isApproved: approvedLeadIds.has(lead.id) }))
+  res.json({ leads })
+})
+
+app.get('/api/admin/trojan/history', requireAuth, async (req, res) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Acesso restrito a administradores.' })
+  const store = await readStore()
+  const messages = store.messages
+    .filter((message) => message.source === 'trojan')
+    .slice()
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, 250)
+    .map((message) => {
+      const lead = message.leadId ? store.leadPool.find((item) => item.id === message.leadId) : null
+      const sender = store.users.find((item) => item.id === message.userId)
+      return {
+        ...message,
+        lead: lead ? { id: lead.id, name: lead.name, category: lead.category, city: lead.city, phone: lead.phone } : null,
+        senderName: sender?.name || 'Desconhecido',
+      }
+    })
+  res.json({ messages, campaigns: store.trojanCampaigns || [] })
+})
+
+app.post('/api/admin/trojan/send', requireAuth, async (req, res, next) => {
+  try {
+    if (!isAdmin(req.user)) return res.status(403).json({ error: 'Acesso restrito a administradores.' })
+
+    const leadIds = Array.isArray(req.body.leadIds) ? req.body.leadIds : []
+    const variants = Array.isArray(req.body.messages)
+      ? req.body.messages.map((text) => String(text || '').trim()).filter(Boolean)
+      : []
+    if (!leadIds.length) return res.status(400).json({ error: 'Selecione ao menos um lead.' })
+    if (variants.length < 3) return res.status(400).json({ error: 'Preencha as 3 formas de mensagem.' })
+
+    const store = await readStore()
+    const user = await getCurrentUser(req, store)
+    const status = await getInstanceStatus(user.evolutionInstanceName)
+    if (status.connectionStatus !== 'open') {
+      return res.status(409).json({ error: 'Conecte o WhatsApp do administrador antes de enviar o Cavalo de Troia.' })
+    }
+
+    const selectedLeads = leadIds
+      .map((id) => store.leadPool.find((lead) => lead.id === id))
+      .filter(Boolean)
+      .filter((lead) => lead.phone)
+
+    if (!selectedLeads.length) return res.status(400).json({ error: 'Os leads selecionados não possuem WhatsApp válido.' })
+
+    const now = new Date().toISOString()
+    const campaign = {
+      id: createId('trojan'),
+      name: req.body.name?.trim() || `Cavalo de Troia ${new Date().toLocaleDateString('pt-BR')}`,
+      userId: user.id,
+      createdAt: now,
+      total: selectedLeads.length,
+      sent: 0,
+      failed: 0,
+      variants,
+    }
+    store.trojanCampaigns.push(campaign)
+
+    const results = []
+    for (let index = 0; index < selectedLeads.length; index += 1) {
+      const lead = selectedLeads[index]
+      const variantIndex = index % variants.length
+      const text = renderTrojanText(variants[variantIndex], lead)
+      let result
+      try {
+        result = await sendWhatsAppText({ number: lead.phone, text, instanceName: user.evolutionInstanceName })
+      } catch (error) {
+        result = { ok: false, status: 'network_error', error: error.message }
+      }
+
+      const message = {
+        id: createId('msg'),
+        userId: user.id,
+        leadId: lead.id,
+        assignmentId: activeAssignmentForLead(store, lead.id)?.id || null,
+        number: String(lead.phone).replace(/\D/g, ''),
+        text,
+        status: result.ok ? 'sent' : 'failed',
+        providerStatus: result.status || null,
+        source: 'trojan',
+        campaignId: campaign.id,
+        campaignName: campaign.name,
+        variantIndex: variantIndex + 1,
+        createdAt: new Date().toISOString(),
+      }
+      store.messages.push(message)
+      if (result.ok) {
+        campaign.sent += 1
+        lead.lastContactAt = message.createdAt
+      } else {
+        campaign.failed += 1
+      }
+      results.push({ leadId: lead.id, leadName: lead.name, number: message.number, status: message.status, variantIndex: message.variantIndex })
+    }
+
+    addActivity(store, {
+      type: 'trojan_campaign',
+      userId: user.id,
+      text: `${campaign.name}: ${campaign.sent} enviada(s), ${campaign.failed} falha(s).`,
+    })
+    await writeStore(store)
+    res.status(201).json({ campaign, results })
+  } catch (error) {
+    next(error)
+  }
+})
+
 app.use(express.static(distDir))
 app.get(/.*/, (_req, res) => {
   res.sendFile(path.join(distDir, 'index.html'))
@@ -967,6 +1086,14 @@ function countOwners(store, assignments) {
 function isSameDay(value, date) {
   const left = new Date(value)
   return left.getFullYear() === date.getFullYear() && left.getMonth() === date.getMonth() && left.getDate() === date.getDate()
+}
+
+function renderTrojanText(template, lead) {
+  return String(template || '')
+    .replace(/\{nome\}/gi, lead.name || '')
+    .replace(/\{cidade\}/gi, lead.city || '')
+    .replace(/\{nicho\}/gi, lead.category || '')
+    .replace(/\{telefone\}/gi, lead.phone || '')
 }
 
 function toWhatsappView(status) {

@@ -38,6 +38,8 @@ type Lead = {
   lastOwnerName?: string | null
   lastContactAt?: string | null
   fromCache?: boolean
+  hasTrojan?: boolean
+  isApproved?: boolean
   cnpj?: string | null
   cnpjRazaoSocial?: string | null
   cnpjPorte?: string | null
@@ -159,6 +161,13 @@ type InboxMessage = {
   lead?: { id: string; name: string; category: string; city: string; phone?: string } | null
 }
 
+type TrojanMessage = InboxMessage & {
+  source?: string
+  campaignId?: string
+  campaignName?: string
+  variantIndex?: number
+}
+
 const stages = ['Aprovado', 'Abordagem pronta', 'Mensagem enviada', 'Respondeu', 'Reunião marcada', 'Proposta enviada', 'Fechado', 'Perdido', 'Inativo']
 
 function App() {
@@ -181,12 +190,13 @@ function App() {
   const [isBusy, setIsBusy] = useState(false)
 
   const refreshCore = useCallback(async () => {
+    const globalScope = user?.isAdmin ? '?scope=global' : ''
     const [dashboardData, approvalData, poolData, crmData, followUpData, notifData] = await Promise.all([
       api<{ totals: Dashboard['totals']; daily: Dashboard['daily']; leads: Assignment[]; recentRuns: SearchRun[]; crm: Dashboard['crm'] }>('/api/dashboard'),
       api<{ leads: Lead[] }>('/api/leads/approval'),
       api<{ leads: Lead[] }>('/api/leads/pool'),
-      api<{ assignments: Assignment[] }>('/api/crm'),
-      api<{ followUps: FollowUp[] }>('/api/follow-ups'),
+      api<{ assignments: Assignment[] }>(`/api/crm${globalScope}`),
+      api<{ followUps: FollowUp[] }>(`/api/follow-ups${globalScope}`),
       api<{ notifications: Notification[] }>('/api/notifications'),
     ])
     setDashboard(dashboardData)
@@ -195,7 +205,7 @@ function App() {
     setAssignments(crmData.assignments)
     setFollowUps(followUpData.followUps)
     setNotifications(notifData.notifications)
-  }, [])
+  }, [user?.isAdmin])
 
   const checkSession = useCallback(async () => {
     const data = await api<{ user: SessionUser | null }>('/api/auth/session')
@@ -334,7 +344,7 @@ function App() {
           <NavButton current={view} id="crm" label="Meu CRM" onClick={setView} />
           <NavButton current={view} id="kanban" label="Pipeline" onClick={setView} />
           <NavButton current={view} id="followups" label={`Follow-ups (${metrics.followUps})`} onClick={setView} />
-          <NavButton current={view} id="inbox" label={`Inbox (${metrics.sent})`} onClick={(v) => { setView(v); api<{ messages: InboxMessage[] }>('/api/inbox').then((d) => setInboxMessages(d.messages)).catch(() => null) }} />
+          <NavButton current={view} id="inbox" label={`Inbox (${metrics.sent})`} onClick={(v) => { setView(v); api<{ messages: InboxMessage[] }>(`/api/inbox${user.isAdmin ? '?scope=global' : ''}`).then((d) => setInboxMessages(d.messages)).catch(() => null) }} />
           <NavButton current={view} id="pool" label={`Base Geral (${metrics.available})`} onClick={setView} />
           <NavButton current={view} id="whatsapp" label="WhatsApp" onClick={setView} />
           {user.isAdmin && <NavButton current={view} id="admin" label="Admin" onClick={setView} />}
@@ -835,6 +845,28 @@ function KanbanView({ assignments, followUps, onOpenCrm }: {
 
   const activeStageGroups = grouped.filter((g) => !['Perdido', 'Inativo'].includes(g.stage))
 
+  function exportColumn(stage: string, items: Assignment[]) {
+    const rows = items.map((a) => [
+      a.lead.name,
+      a.lead.category || '',
+      a.lead.city || '',
+      a.lead.phone || '',
+      a.lead.website || '',
+      a.lead.email || '',
+      a.temperature,
+      a.nextAction || '',
+      a.approach || '',
+      a.ownerName || '',
+      a.lead.score != null ? String(a.lead.score) : '',
+    ])
+    const csv = toCsv([
+      ['nome', 'nicho', 'cidade', 'whatsapp', 'site', 'email', 'temperatura', 'proximo_passo', 'abordagem', 'responsavel', 'score'],
+      ...rows,
+    ])
+    const slug = stage.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+    downloadText(`pipeline-${slug}.csv`, csv, 'text/csv')
+  }
+
   return (
     <div className="kanban-view">
       {/* ── Filtros ── */}
@@ -869,7 +901,19 @@ function KanbanView({ assignments, followUps, onOpenCrm }: {
           <div className="kanban-col" key={group.stage}>
             <div className="kanban-col-header">
               <span>{group.stage}</span>
-              <span className="kanban-col-count">{group.items.length}</span>
+              <div className="kanban-col-header-right">
+                <span className="kanban-col-count">{group.items.length}</span>
+                {group.items.length > 0 && (
+                  <button
+                    type="button"
+                    className="kanban-export-btn"
+                    title={`Exportar CSV — ${group.stage}`}
+                    onClick={(e) => { e.stopPropagation(); exportColumn(group.stage, group.items) }}
+                  >
+                    ↓ CSV
+                  </button>
+                )}
+              </div>
             </div>
             <div className="kanban-col-body">
               {group.items.map((a) => {
@@ -1398,6 +1442,7 @@ function WhatsAppView({ whatsapp, qrCode, onConnect, onRefresh }: { whatsapp: Wh
 }
 
 function AdminView({ dashboard, runs }: { dashboard: Dashboard | null; assignments?: Assignment[]; runs: SearchRun[] }) {
+  const [adminTab, setAdminTab] = useState<'users' | 'trojan'>('users')
   const [users, setUsers] = useState<AdminUser[]>([])
   const [form, setForm] = useState({ name: '', username: '', password: '', role: 'Comercial' })
   const [editing, setEditing] = useState<AdminUser | null>(null)
@@ -1529,6 +1574,15 @@ function AdminView({ dashboard, runs }: { dashboard: Dashboard | null; assignmen
   }
 
   return (
+    <>
+      <div className="admin-tabs">
+        <button type="button" className={adminTab === 'users' ? 'active' : ''} onClick={() => setAdminTab('users')}>Gestão</button>
+        <button type="button" className={adminTab === 'trojan' ? 'active' : ''} onClick={() => setAdminTab('trojan')}>Cavalo de Troia</button>
+      </div>
+
+      {adminTab === 'trojan' && <TrojanView />}
+
+      {adminTab === 'users' && (
     <section className="content-grid">
 
       {/* ── Criar conta ── */}
@@ -1685,6 +1739,218 @@ function AdminView({ dashboard, runs }: { dashboard: Dashboard | null; assignmen
       </article>
 
     </section>
+      )}
+    </>
+  )
+}
+
+function TrojanView() {
+  const [leads, setLeads] = useState<Lead[]>([])
+  const [history, setHistory] = useState<TrojanMessage[]>([])
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [search, setSearch] = useState('')
+  const [city, setCity] = useState('')
+  const [category, setCategory] = useState('')
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'approved' | 'new'>('all')
+  const [campaignName, setCampaignName] = useState('')
+  const [messages, setMessages] = useState([
+    'Oi, {nome}! Vi a presença digital de vocês em {cidade} e queria te mostrar uma ideia rápida para gerar mais contatos pelo WhatsApp.',
+    'Olá! Falo com o pessoal da {nome}? Trabalho com melhorias comerciais para empresas de {nicho} e tenho uma sugestão bem objetiva.',
+    'Tudo bem? Passei pelo perfil da {nome} e notei uma oportunidade simples para aumentar pedidos e orçamentos online.',
+  ])
+  const [status, setStatus] = useState('')
+  const [isSending, setIsSending] = useState(false)
+
+  const loadTrojan = useCallback(async () => {
+    const [leadData, historyData] = await Promise.all([
+      api<{ leads: Lead[] }>('/api/admin/trojan/leads'),
+      api<{ messages: TrojanMessage[] }>('/api/admin/trojan/history'),
+    ])
+    setLeads(leadData.leads)
+    setHistory(historyData.messages)
+  }, [])
+
+  useEffect(() => {
+    loadTrojan().catch((err) => setStatus(err instanceof Error ? err.message : 'Erro ao carregar Cavalo de Troia.'))
+  }, [loadTrojan])
+
+  const cities = useMemo(() => Array.from(new Set(leads.map((lead) => lead.city).filter(Boolean))).sort(), [leads])
+  const categories = useMemo(() => Array.from(new Set(leads.map((lead) => lead.category).filter(Boolean))).sort(), [leads])
+
+  const filtered = useMemo(() => {
+    let result = leads
+    if (sourceFilter === 'approved') result = result.filter((lead) => lead.isApproved)
+    if (sourceFilter === 'new') result = result.filter((lead) => !lead.hasTrojan)
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      result = result.filter((lead) =>
+        lead.name.toLowerCase().includes(q) ||
+        (lead.phone || '').includes(q) ||
+        (lead.city || '').toLowerCase().includes(q) ||
+        (lead.category || '').toLowerCase().includes(q)
+      )
+    }
+    if (city) result = result.filter((lead) => lead.city === city)
+    if (category) result = result.filter((lead) => lead.category === category)
+    return result
+  }, [leads, search, city, category, sourceFilter])
+
+  const selectedLeads = useMemo(() => leads.filter((lead) => selectedIds.has(lead.id)), [leads, selectedIds])
+  const allFilteredSelected = filtered.length > 0 && filtered.every((lead) => selectedIds.has(lead.id))
+  const sentHistory = history.filter((msg) => msg.status === 'sent')
+
+  function toggleLead(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  function toggleFiltered() {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      filtered.forEach((lead) => allFilteredSelected ? next.delete(lead.id) : next.add(lead.id))
+      return next
+    })
+  }
+
+  async function sendTrojan() {
+    if (!selectedLeads.length) return setStatus('Selecione ao menos um lead.')
+    if (messages.some((msg) => !msg.trim())) return setStatus('Preencha as 3 formas de mensagem.')
+    if (!confirm(`Enviar Cavalo de Troia para ${selectedLeads.length} lead${selectedLeads.length !== 1 ? 's' : ''}?`)) return
+
+    setIsSending(true)
+    setStatus('Enviando mensagens...')
+    try {
+      const data = await api<{ campaign: { sent: number; failed: number } }>('/api/admin/trojan/send', {
+        method: 'POST',
+        body: JSON.stringify({ leadIds: selectedLeads.map((lead) => lead.id), messages, name: campaignName }),
+      })
+      setStatus(`${data.campaign.sent} enviada(s), ${data.campaign.failed} falha(s).`)
+      setSelectedIds(new Set())
+      await loadTrojan()
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : 'Erro ao enviar Cavalo de Troia.')
+    } finally {
+      setIsSending(false)
+    }
+  }
+
+  function exportTxt() {
+    const numbers = uniqueNumbers(sentHistory)
+    downloadText('cavalo-de-troia-numeros.txt', numbers.join('\n'), 'text/plain')
+  }
+
+  function exportCsv() {
+    const rows = sentHistory.map((msg) => [
+      msg.number,
+      msg.lead?.name || '',
+      msg.lead?.city || '',
+      msg.lead?.category || '',
+      msg.campaignName || '',
+      formatDate(msg.createdAt),
+      msg.variantIndex || '',
+    ])
+    downloadText('cavalo-de-troia-numeros.csv', toCsv([['numero', 'lead', 'cidade', 'nicho', 'campanha', 'enviado_em', 'variacao'], ...rows]), 'text/csv')
+  }
+
+  return (
+    <section className="content-grid trojan-grid">
+      <article className="panel wide trojan-hero">
+        <PanelTitle title="Cavalo de Troia" description="Selecione leads, alterne 3 mensagens e deixe o histórico pronto para auditoria e exportação." />
+        <div className="strategy-grid">
+          <InfoCard label="Leads com WhatsApp" value={leads.length} />
+          <InfoCard label="Selecionados" value={selectedLeads.length} />
+          <InfoCard label="Histórico enviado" value={sentHistory.length} />
+          <InfoCard label="Números únicos" value={uniqueNumbers(sentHistory).length} />
+        </div>
+        {status && <p className={status.includes('Erro') || status.includes('Conecte') || status.includes('Selecione') ? 'form-error' : 'form-success'}>{status}</p>}
+      </article>
+
+      <article className="panel">
+        <PanelTitle title="Selecionar leads" description={`${filtered.length} de ${leads.length} lead${leads.length !== 1 ? 's' : ''} com número disponível.`} />
+        <div className="review-filters">
+          <div className="trojan-source-tabs">
+            <button type="button" className={`review-pill${sourceFilter === 'all' ? ' active' : ''}`} onClick={() => setSourceFilter('all')}>Todos</button>
+            <button type="button" className={`review-pill${sourceFilter === 'approved' ? ' active' : ''}`} onClick={() => setSourceFilter('approved')}>Aprovados no CRM</button>
+            <button type="button" className={`review-pill${sourceFilter === 'new' ? ' active' : ''}`} onClick={() => setSourceFilter('new')}>Ainda não contatados</button>
+          </div>
+          <input className="review-search" type="search" placeholder="Buscar por nome, telefone, nicho ou cidade..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          <div className="review-filter-row">
+            <select value={city} onChange={(e) => setCity(e.target.value)}>
+              <option value="">Todas as cidades</option>
+              {cities.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+            <select value={category} onChange={(e) => setCategory(e.target.value)}>
+              <option value="">Todos os nichos</option>
+              {categories.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+            {(search || city || category) && <button type="button" className="review-pill clear" onClick={() => { setSearch(''); setCity(''); setCategory('') }}>Limpar</button>}
+          </div>
+          <div className="bulk-bar">
+            <button type="button" className={`bulk-select-all${allFilteredSelected ? ' active' : ''}`} onClick={toggleFiltered}>
+              <span className={`check-box${allFilteredSelected ? ' checked' : ''}`} />
+              {allFilteredSelected ? 'Desmarcar filtrados' : `Selecionar filtrados (${filtered.length})`}
+            </button>
+            <span className="bulk-count">{selectedLeads.length} selecionado{selectedLeads.length !== 1 ? 's' : ''}</span>
+          </div>
+        </div>
+        <div className="lead-table trojan-leads">
+          {filtered.map((lead) => (
+            <LeadRow key={lead.id} lead={lead} onClick={() => toggleLead(lead.id)} checked={selectedIds.has(lead.id)} onCheck={(e) => { e.stopPropagation(); toggleLead(lead.id) }} />
+          ))}
+          {!filtered.length && <Empty text="Nenhum lead com WhatsApp encontrado." />}
+        </div>
+      </article>
+
+      <article className="panel sticky-panel">
+        <PanelTitle title="3 formas de mensagem" description="Use {nome}, {cidade}, {nicho} e {telefone}; o envio alterna as variações automaticamente." />
+        <label>Nome da campanha
+          <input value={campaignName} onChange={(e) => setCampaignName(e.target.value)} placeholder="Ex: Reativação maio" />
+        </label>
+        <div className="trojan-message-stack">
+          {messages.map((message, index) => (
+            <label key={index}>Variação {index + 1}
+              <textarea rows={5} value={message} onChange={(e) => setMessages((prev) => prev.map((item, i) => i === index ? e.target.value : item))} />
+            </label>
+          ))}
+        </div>
+        <div className="button-row">
+          <button className="primary-button" type="button" onClick={sendTrojan} disabled={isSending || selectedLeads.length === 0}>
+            {isSending ? 'Enviando...' : `Enviar para ${selectedLeads.length}`}
+          </button>
+        </div>
+      </article>
+
+      <article className="panel wide">
+        <PanelTitle title="Histórico do Cavalo de Troia" description="Registros de quem recebeu, número usado, campanha e variação enviada." />
+        <div className="button-row">
+          <button className="ghost-button" type="button" onClick={exportTxt} disabled={!sentHistory.length}>Exportar TXT</button>
+          <button className="ghost-button" type="button" onClick={exportCsv} disabled={!sentHistory.length}>Exportar CSV</button>
+        </div>
+        <div className="inbox-list">
+          {history.map((msg) => (
+            <div key={msg.id} className={`inbox-row${msg.status === 'failed' ? ' failed' : ''}`}>
+              <div className="inbox-lead">
+                <strong>{msg.lead?.name || msg.number}</strong>
+                <span>{msg.campaignName || 'Cavalo de Troia'}{msg.variantIndex ? ` · variação ${msg.variantIndex}` : ''}</span>
+                <span className="inbox-phone">{msg.number}</span>
+              </div>
+              <div className="inbox-body">
+                <p className="inbox-text">{msg.text}</p>
+                <div className="inbox-footer">
+                  <span className={`inbox-status ${msg.status}`}>{msg.status === 'sent' ? 'Enviado' : 'Falhou'}</span>
+                  <span>{formatDate(msg.createdAt)}</span>
+                  {msg.senderName && <span>por {msg.senderName}</span>}
+                </div>
+              </div>
+            </div>
+          ))}
+          {!history.length && <Empty text="Nenhum Cavalo de Troia enviado ainda." />}
+        </div>
+      </article>
+    </section>
   )
 }
 
@@ -1825,6 +2091,7 @@ function LeadRow({ lead, onClick, selected = false, checked, onCheck }: { lead: 
           {lead.city && <span className="tag-city">{lead.city}</span>}
           {lead.phone && <span className="tag-phone">WA</span>}
           {!lead.website && <span className="tag-no-site">Sem site</span>}
+          {lead.hasTrojan && <span className="tag-trojan">Trojan</span>}
         </div>
         <div className="lead-row-advice">{lead.agentAdvice || lead.pain}</div>
       </div>
@@ -1952,6 +2219,26 @@ function classificationLabel(value?: string) {
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
+}
+
+function uniqueNumbers(messages: Pick<TrojanMessage, 'number'>[]) {
+  return Array.from(new Set(messages.map((msg) => msg.number).filter(Boolean)))
+}
+
+function toCsv(rows: Array<Array<string | number>>) {
+  return rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n')
+}
+
+function downloadText(filename: string, content: string, type: string) {
+  const blob = new Blob([content], { type })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
 }
 
 export default App

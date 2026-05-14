@@ -22,6 +22,7 @@ const initialStore = {
   leadPool: [],
   assignments: [],
   messages: [],
+  trojanCampaigns: [],
   followUps: [],
   notifications: [],
   activityLog: [],
@@ -32,9 +33,9 @@ export async function readStore() {
   await fs.mkdir(dataDir, { recursive: true })
   try {
     const raw = await fs.readFile(storePath, 'utf8')
-    return normalizeStore(JSON.parse(raw))
-  } catch {
-    await writeStore(initialStore)
+    return normalizeStore(JSON.parse(raw.replace(/\0/g, '')))
+  } catch (err) {
+    console.error('[store] readStore failed, NOT overwriting file:', err.message)
     return structuredClone(initialStore)
   }
 }
@@ -120,6 +121,7 @@ function normalizeStore(store = {}) {
     leadPool: Array.isArray(migrated.leadPool) ? migrated.leadPool.map(normalizeLead) : [],
     assignments: Array.isArray(migrated.assignments) ? migrated.assignments.map(normalizeAssignment) : [],
     messages: Array.isArray(migrated.messages) ? migrated.messages : [],
+    trojanCampaigns: Array.isArray(migrated.trojanCampaigns) ? migrated.trojanCampaigns : [],
     followUps: Array.isArray(migrated.followUps) ? migrated.followUps.map(normalizeFollowUp) : [],
     notifications: Array.isArray(migrated.notifications) ? migrated.notifications : [],
     activityLog: Array.isArray(migrated.activityLog) ? migrated.activityLog : [],
