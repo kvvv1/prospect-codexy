@@ -1,7 +1,7 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react'
 import './App.css'
 
-type View = 'day' | 'prospect' | 'approval' | 'pool' | 'kanban' | 'crm' | 'followups' | 'whatsapp' | 'admin' | 'inbox'
+type View = 'day' | 'prospect' | 'approval' | 'pool' | 'kanban' | 'crm' | 'followups' | 'whatsapp' | 'admin' | 'inbox' | 'command'
 
 type SessionUser = {
   id: string
@@ -37,6 +37,7 @@ type Lead = {
   lastOwnerId?: string | null
   lastOwnerName?: string | null
   lastContactAt?: string | null
+  foundByNames?: string[]
   fromCache?: boolean
   hasTrojan?: boolean
   isApproved?: boolean
@@ -168,43 +169,44 @@ type TrojanMessage = InboxMessage & {
   variantIndex?: number
 }
 
-const stages = ['Aprovado', 'Abordagem pronta', 'Mensagem enviada', 'Respondeu', 'Reunião marcada', 'Proposta enviada', 'Fechado', 'Perdido', 'Inativo']
+const stages = ['Aprovado', 'Abordagem pronta', 'Mensagem enviada', 'Reunião marcada', 'Proposta enviada', 'Fechado', 'Perdido', 'Inativo']
+
+const stageColor: Record<string, string> = {
+  'Aprovado':         '#a855f7',
+  'Abordagem pronta': '#3b82f6',
+  'Mensagem enviada': '#8b5cf6',
+  'Reunião marcada':  '#f59e0b',
+  'Proposta enviada': '#10b981',
+  'Fechado':          '#22c55e',
+  'Perdido':          '#ef4444',
+  'Inativo':          '#6b7280',
+}
 
 function App() {
   const introPreview = window.location.search.includes('introPreview=1')
   const [user, setUser] = useState<SessionUser | null>(null)
   const [isCheckingSession, setIsCheckingSession] = useState(true)
-  const [view, setView] = useState<View>('day')
-  const [dashboard, setDashboard] = useState<Dashboard | null>(null)
-  const [approvalLeads, setApprovalLeads] = useState<Lead[]>([])
-  const [poolLeads, setPoolLeads] = useState<Lead[]>([])
   const [assignments, setAssignments] = useState<Assignment[]>([])
   const [followUps, setFollowUps] = useState<FollowUp[]>([])
   const [whatsapp, setWhatsapp] = useState<WhatsAppStatus | null>(null)
-  const [qrCode, setQrCode] = useState('')
-  const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
+  const [prospectOpen, setProspectOpen] = useState(false)
   const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null)
-  const [inboxMessages, setInboxMessages] = useState<InboxMessage[]>([])
-  const [notifications, setNotifications] = useState<Notification[]>([])
   const [status, setStatus] = useState('Pronto.')
   const [isBusy, setIsBusy] = useState(false)
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  const [view, setView] = useState<'kanban' | 'approval'>('kanban')
+  const [approvalCount, setApprovalCount] = useState(0)
+  const [meetingModal, setMeetingModal] = useState<{ assignment: Assignment } | null>(null)
 
   const refreshCore = useCallback(async () => {
     const globalScope = user?.isAdmin ? '?scope=global' : ''
-    const [dashboardData, approvalData, poolData, crmData, followUpData, notifData] = await Promise.all([
-      api<{ totals: Dashboard['totals']; daily: Dashboard['daily']; leads: Assignment[]; recentRuns: SearchRun[]; crm: Dashboard['crm'] }>('/api/dashboard'),
-      api<{ leads: Lead[] }>('/api/leads/approval'),
-      api<{ leads: Lead[] }>('/api/leads/pool'),
+    const [crmData, followUpData] = await Promise.all([
       api<{ assignments: Assignment[] }>(`/api/crm${globalScope}`),
       api<{ followUps: FollowUp[] }>(`/api/follow-ups${globalScope}`),
-      api<{ notifications: Notification[] }>('/api/notifications'),
     ])
-    setDashboard(dashboardData)
-    setApprovalLeads(approvalData.leads)
-    setPoolLeads(poolData.leads)
     setAssignments(crmData.assignments)
     setFollowUps(followUpData.followUps)
-    setNotifications(notifData.notifications)
+    setLastRefresh(new Date())
   }, [user?.isAdmin])
 
   const checkSession = useCallback(async () => {
@@ -221,64 +223,36 @@ function App() {
 
   useEffect(() => {
     if (!user) return
-    // Initial server sync after login.
+    // Initial data load + WhatsApp status after login.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     refreshCore()
-    api<{ whatsapp: WhatsAppStatus }>('/api/users/me/whatsapp').then((data) => setWhatsapp(data.whatsapp)).catch(() => null)
+    api<{ whatsapp: WhatsAppStatus }>('/api/users/me/whatsapp').then((d) => setWhatsapp(d.whatsapp)).catch(() => null)
+    const interval = setInterval(refreshCore, 30_000)
+    return () => clearInterval(interval)
   }, [refreshCore, user])
 
   async function logout() {
     await api('/api/auth/logout', { method: 'POST' })
     setUser(null)
-    setDashboard(null)
   }
 
-  async function approveLead(lead: Lead) {
-    await runAction(`Aprovando ${lead.name} para seu CRM...`, async () => {
-      await api<{ assignment: Assignment }>(`/api/leads/${lead.id}/approve`, { method: 'POST' })
-      await refreshCore()
-    })
-  }
-
-  async function discardLead(lead: Lead) {
-    await runAction(`Descartando ${lead.name}...`, async () => {
-      await api(`/api/leads/${lead.id}/discard`, { method: 'POST', body: JSON.stringify({ reason: 'Descartado na revisão manual.' }) })
-      await refreshCore()
-    })
-  }
-
-  async function bulkApproveLead(leads: Lead[]) {
-    await runAction(`Aprovando ${leads.length} leads em lote...`, async () => {
-      for (const lead of leads) {
-        await api(`/api/leads/${lead.id}/approve`, { method: 'POST' })
-      }
-      await refreshCore()
-    })
-  }
-
-  async function bulkDiscardLead(leads: Lead[]) {
-    await runAction(`Descartando ${leads.length} leads em lote...`, async () => {
-      for (const lead of leads) {
-        await api(`/api/leads/${lead.id}/discard`, { method: 'POST', body: JSON.stringify({ reason: 'Descartado em lote na revisão manual.' }) })
-      }
-      await refreshCore()
-    })
-  }
-
-  async function claimLead(lead: Lead) {
-    await runAction(`Assumindo ${lead.name}...`, async () => {
-      const data = await api<{ assignment: Assignment }>(`/api/leads/${lead.id}/claim`, { method: 'POST' })
-      setSelectedAssignment(data.assignment)
-      setSelectedLead(data.assignment.lead)
-      setView('crm')
-      await refreshCore()
-    })
-  }
-
-  async function updateStage(assignment: Assignment, stage: string) {
+  async function updateStage(assignment: Assignment, stage: string, extra?: { nextAction?: string; note?: string }) {
+    if (stage === 'Reunião marcada' && !extra) {
+      setMeetingModal({ assignment })
+      return
+    }
     await runAction('Atualizando etapa...', async () => {
-      const data = await api<{ assignment: Assignment }>(`/api/assignments/${assignment.id}/stage`, { method: 'POST', body: JSON.stringify({ stage }) })
+      const body: Record<string, string> = { stage, ...(extra || {}) }
+      const data = await api<{ assignment: Assignment }>(`/api/assignments/${assignment.id}/stage`, { method: 'POST', body: JSON.stringify(body) })
       setSelectedAssignment(data.assignment)
+      await refreshCore()
+    })
+  }
+
+  async function deleteAssignment(assignment: Assignment) {
+    await runAction('Removendo lead...', async () => {
+      await api(`/api/assignments/${assignment.id}`, { method: 'DELETE' })
+      if (selectedAssignment?.id === assignment.id) setSelectedAssignment(null)
       await refreshCore()
     })
   }
@@ -287,7 +261,6 @@ function App() {
     await runAction('Liberando lead para a Base Geral...', async () => {
       await api(`/api/assignments/${assignment.id}/release`, { method: 'POST', body: JSON.stringify({ reason: 'Liberado manualmente para reativação.' }) })
       setSelectedAssignment(null)
-      setSelectedLead(null)
       await refreshCore()
     })
   }
@@ -296,14 +269,6 @@ function App() {
     await runAction('Concluindo follow-up...', async () => {
       await api(`/api/follow-ups/${followUp.id}/complete`, { method: 'POST' })
       await refreshCore()
-    })
-  }
-
-  async function connectWhatsApp() {
-    await runAction('Gerando QR Code do WhatsApp comercial...', async () => {
-      const data = await api<{ whatsapp: WhatsAppStatus; qrcode: { base64?: string } }>('/api/users/me/whatsapp/connect', { method: 'POST' })
-      setWhatsapp(data.whatsapp)
-      setQrCode(data.qrcode.base64 || '')
     })
   }
 
@@ -320,67 +285,204 @@ function App() {
     }
   }
 
-  const metrics = dashboard?.totals || { opportunities: 0, qualified: 0, sent: 0, followUps: 0, available: 0, approval: 0, notifications: 0 }
-  const unreadCount = notifications.filter((n) => !n.read).length
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return
+      if (selectedAssignment != null) { setSelectedAssignment(null); return }
+      if (prospectOpen) { setProspectOpen(false) }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [selectedAssignment, prospectOpen])
 
   if (isCheckingSession) return <div className="boot-screen">Carregando Codexy Prospect...</div>
   if (introPreview) return <LogoValidationScreen />
   if (!user) return <LoginScreen onLogin={setUser} />
 
+  const crmOpen = selectedAssignment != null
+
+  function openCrm(a: Assignment) { setSelectedAssignment(a) }
+  function closeCrm() { setSelectedAssignment(null) }
+  function closeProspect() { setProspectOpen(false) }
+
+  function refreshTimestamp() {
+    if (!lastRefresh) return null
+    const sec = Math.floor((Date.now() - lastRefresh.getTime()) / 1000)
+    if (sec < 10) return 'agora'
+    if (sec < 60) return `${sec}s`
+    return `${Math.floor(sec / 60)}min`
+  }
+
   return (
-    <main className="app-shell">
-      <aside className="sidebar">
+    <main className="page-shell">
+      <header className="page-topbar">
         <Brand />
-        <div className="user-card">
-          <span>Logado como</span>
-          <strong>{user.name}</strong>
-          <small>{user.role}</small>
+        <nav className="page-nav">
+          <button type="button" className={`page-nav-btn${view === 'kanban' ? ' active' : ''}`} onClick={() => setView('kanban')}>Pipeline</button>
+          <button type="button" className={`page-nav-btn${view === 'approval' ? ' active' : ''}`} onClick={() => setView('approval')}>
+            Aprovação{approvalCount > 0 ? <span className="page-nav-badge">{approvalCount}</span> : null}
+          </button>
+        </nav>
+        <div className="page-center">
+          <span className="page-status">{status}</span>
+          {lastRefresh && <span className="page-refresh-badge" title={lastRefresh.toLocaleTimeString()}>↻ {refreshTimestamp()}</span>}
+        </div>
+        <div className="page-user">
+          <span>{user.name}</span>
           <button type="button" onClick={logout}>Sair</button>
         </div>
-        <nav>
-          <NavButton current={view} id="day" label={greeting()} badge={unreadCount} onClick={setView} />
-          <NavButton current={view} id="prospect" label="Criar Prospecção" onClick={setView} />
-          <NavButton current={view} id="approval" label={`Aprovação (${metrics.approval})`} onClick={setView} />
-          <NavButton current={view} id="crm" label="Meu CRM" onClick={setView} />
-          <NavButton current={view} id="kanban" label="Pipeline" onClick={setView} />
-          <NavButton current={view} id="followups" label={`Follow-ups (${metrics.followUps})`} onClick={setView} />
-          <NavButton current={view} id="inbox" label={`Inbox (${metrics.sent})`} onClick={(v) => { setView(v); api<{ messages: InboxMessage[] }>(`/api/inbox${user.isAdmin ? '?scope=global' : ''}`).then((d) => setInboxMessages(d.messages)).catch(() => null) }} />
-          <NavButton current={view} id="pool" label={`Base Geral (${metrics.available})`} onClick={setView} />
-          <NavButton current={view} id="whatsapp" label="WhatsApp" onClick={setView} />
-          {user.isAdmin && <NavButton current={view} id="admin" label="Admin" onClick={setView} />}
-        </nav>
-      </aside>
+      </header>
 
-      <section className="workspace">
-        <header className="topbar">
-          <div>
-            <span className="product-label">Codexy Prospect</span>
-            <h1>{viewTitle(view, user)}</h1>
-            <p>{viewDescription(view)}</p>
+      <div className="page-body">
+        {view === 'kanban' && <KanbanView assignments={assignments} followUps={followUps} onOpenCrm={openCrm} onStage={updateStage} onRefresh={refreshCore} onRunAction={runAction} user={user} onDelete={deleteAssignment} />}
+        {view === 'approval' && <ApprovalView user={user} onRefreshCore={refreshCore} onCountChange={setApprovalCount} />}
+      </div>
+
+      {crmOpen && (
+        <>
+          <div className="crm-overlay-backdrop" role="button" aria-label="Fechar" tabIndex={0} onClick={closeCrm} onKeyDown={(e) => e.key === 'Enter' && closeCrm()} />
+          <div className="crm-overlay-drawer">
+            <button type="button" className="crm-overlay-close" onClick={closeCrm}>✕ Fechar</button>
+            <CrmView
+              assignments={assignments}
+              followUps={followUps}
+              whatsapp={whatsapp}
+              selected={selectedAssignment}
+              onSelect={(a) => setSelectedAssignment(a)}
+              onStage={updateStage}
+              onRelease={async (a) => { await releaseAssignment(a); closeCrm() }}
+              onCompleteFollowUp={completeFollowUp}
+              onRefresh={refreshCore}
+            />
           </div>
-          <div className="status-pill">{status}</div>
-        </header>
+        </>
+      )}
 
-        <section className="metrics">
-          <Metric label="CRM ativo" value={metrics.opportunities} />
-          <Metric label="Aprovação" value={metrics.approval} />
-          <Metric label="Base Geral" value={metrics.available} />
-          <Metric label="Follow-ups" value={metrics.followUps} />
-          <Metric label="Enviadas" value={metrics.sent} />
-        </section>
+      {prospectOpen && (
+        <>
+          <div className="crm-overlay-backdrop" role="button" aria-label="Fechar" tabIndex={0} onClick={closeProspect} onKeyDown={(e) => e.key === 'Enter' && closeProspect()} />
+          <div className="crm-overlay-drawer prospect-drawer">
+            <button type="button" className="crm-overlay-close" onClick={closeProspect}>✕ Fechar</button>
+            <ProspectView
+              isBusy={isBusy}
+              onRun={async () => { await refreshCore(); closeProspect() }}
+              setStatus={setStatus}
+              setBusy={setIsBusy}
+            />
+          </div>
+        </>
+      )}
 
-        {view === 'day' && <DayView dashboard={dashboard} assignments={assignments} followUps={followUps} notifications={notifications} onOpenCrm={(assignment) => { setSelectedAssignment(assignment); setSelectedLead(assignment.lead); setView('crm') }} onGo={setView} onReadNotifications={async () => { await api('/api/notifications/read-all', { method: 'POST' }); setNotifications((prev) => prev.map((n) => ({ ...n, read: true }))) }} />}
-        {view === 'prospect' && <ProspectView isBusy={isBusy} onRun={refreshCore} setStatus={setStatus} setBusy={setIsBusy} />}
-        {view === 'approval' && <LeadReviewView title="Leads para aprovação" leads={approvalLeads} selectedLead={selectedLead} onSelect={setSelectedLead} onLeadUpdate={setSelectedLead} onApprove={approveLead} onDiscard={discardLead} onBulkApprove={bulkApproveLead} onBulkDiscard={bulkDiscardLead} primaryLabel="Aprovar para meu CRM" />}
-        {view === 'pool' && <LeadReviewView title="Base Geral disponível" leads={poolLeads} selectedLead={selectedLead} onSelect={setSelectedLead} onLeadUpdate={setSelectedLead} onApprove={claimLead} onDiscard={discardLead} onBulkDiscard={bulkDiscardLead} primaryLabel="Assumir lead" />}
-        {view === 'kanban' && <KanbanView assignments={assignments} followUps={followUps} onOpenCrm={(a) => { setSelectedAssignment(a); setSelectedLead(a.lead); setView('crm') }} />}
-        {view === 'crm' && <CrmView assignments={assignments} followUps={followUps} whatsapp={whatsapp} selected={selectedAssignment} onSelect={(assignment) => { setSelectedAssignment(assignment); setSelectedLead(assignment.lead) }} onStage={updateStage} onRelease={releaseAssignment} onCompleteFollowUp={completeFollowUp} onRefresh={refreshCore} />}
-        {view === 'followups' && <FollowUpView followUps={followUps} onDone={completeFollowUp} />}
-        {view === 'inbox' && <InboxView messages={inboxMessages} onOpenCrm={(msg) => { if (msg.lead) { const a = assignments.find((x) => x.id === msg.assignmentId); if (a) { setSelectedAssignment(a); setView('crm') } } }} />}
-        {view === 'whatsapp' && <WhatsAppView whatsapp={whatsapp} qrCode={qrCode} onConnect={connectWhatsApp} onRefresh={async () => setWhatsapp((await api<{ whatsapp: WhatsAppStatus }>('/api/users/me/whatsapp')).whatsapp)} />}
-        {view === 'admin' && user.isAdmin && <AdminView dashboard={dashboard} assignments={assignments} runs={dashboard?.recentRuns || []} />}
-      </section>
+      {meetingModal && (
+        <MeetingContextModal
+          assignment={meetingModal.assignment}
+          onConfirm={async (extra) => {
+            setMeetingModal(null)
+            await updateStage(meetingModal.assignment, 'Reunião marcada', extra)
+          }}
+          onCancel={() => setMeetingModal(null)}
+        />
+      )}
+
+      <button type="button" className="fab-prospect" onClick={() => setProspectOpen(true)} title="Criar nova prospecção">
+        <svg viewBox="0 0 20 20" fill="none" width="20" height="20">
+          <path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+        </svg>
+        <span>Prospectar</span>
+      </button>
     </main>
+  )
+}
+
+function MeetingContextModal({ assignment, onConfirm, onCancel }: {
+  assignment: Assignment
+  onConfirm: (extra: { nextAction: string; note: string }) => Promise<void>
+  onCancel: () => void
+}) {
+  const [step, setStep] = useState(1)
+  const [response, setResponse] = useState('')
+  const [date, setDate] = useState('')
+  const [time, setTime] = useState('')
+  const [format, setFormat] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const formats = ['Ligação', 'Videochamada', 'Presencial', 'WhatsApp']
+
+  async function confirm() {
+    if (!response.trim() || !date || !time || !format) return
+    setBusy(true)
+    const dateLabel = new Date(`${date}T${time}`).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
+    const nextAction = `Reunião: ${dateLabel} — ${format}`
+    const note = `Contexto da conversa: ${response.trim()}`
+    await onConfirm({ nextAction, note })
+    setBusy(false)
+  }
+
+  return (
+    <div className="meeting-modal-overlay" onClick={onCancel}>
+      <div className="meeting-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="meeting-modal-header">
+          <span className="meeting-modal-lead">{assignment.lead.name}</span>
+          <span className="meeting-modal-step">Passo {step} de 3</span>
+        </div>
+
+        <div className="meeting-modal-progress">
+          {[1,2,3].map((s) => <div key={s} className={`meeting-modal-dot${step >= s ? ' done' : ''}`} />)}
+        </div>
+
+        {step === 1 && (
+          <div className="meeting-modal-body">
+            <h3>Como eles responderam?</h3>
+            <p>Descreva o contexto da conversa que levou à reunião.</p>
+            <textarea
+              className="meeting-modal-textarea"
+              placeholder="Ex: Demonstraram interesse no produto, pediram mais detalhes sobre o preço..."
+              value={response}
+              onChange={(e) => setResponse(e.target.value)}
+              autoFocus
+              rows={4}
+            />
+            <div className="meeting-modal-actions">
+              <button type="button" className="meeting-btn-ghost" onClick={onCancel}>Cancelar</button>
+              <button type="button" className="meeting-btn-primary" onClick={() => setStep(2)} disabled={!response.trim()}>Próximo →</button>
+            </div>
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="meeting-modal-body">
+            <h3>Quando é a reunião?</h3>
+            <p>Data e horário agendados.</p>
+            <div className="meeting-modal-datetime">
+              <input type="date" className="meeting-modal-input" value={date} onChange={(e) => setDate(e.target.value)} />
+              <input type="time" className="meeting-modal-input" value={time} onChange={(e) => setTime(e.target.value)} />
+            </div>
+            <div className="meeting-modal-actions">
+              <button type="button" className="meeting-btn-ghost" onClick={() => setStep(1)}>← Voltar</button>
+              <button type="button" className="meeting-btn-primary" onClick={() => setStep(3)} disabled={!date || !time}>Próximo →</button>
+            </div>
+          </div>
+        )}
+
+        {step === 3 && (
+          <div className="meeting-modal-body">
+            <h3>Formato da reunião</h3>
+            <p>Como vai acontecer o encontro?</p>
+            <div className="meeting-modal-formats">
+              {formats.map((f) => (
+                <button key={f} type="button" className={`meeting-format-btn${format === f ? ' selected' : ''}`} onClick={() => setFormat(f)}>{f}</button>
+              ))}
+            </div>
+            <div className="meeting-modal-actions">
+              <button type="button" className="meeting-btn-ghost" onClick={() => setStep(2)}>← Voltar</button>
+              <button type="button" className="meeting-btn-confirm" onClick={confirm} disabled={!format || busy}>
+                {busy ? 'Salvando…' : '✓ Confirmar reunião'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -504,22 +606,53 @@ function DayView({ dashboard, assignments, followUps, notifications, onOpenCrm, 
 }
 
 function ProspectView({ isBusy, onRun, setStatus, setBusy }: { isBusy: boolean; onRun: () => Promise<void>; setStatus: (value: string) => void; setBusy: (value: boolean) => void }) {
-  const [prompt, setPrompt] = useState('Quero vender landing page para odontologia em Belo Horizonte')
+  const [step, setStep] = useState<'product' | 'audience' | 'scale' | 'preview' | 'done'>('product')
   const [product, setProduct] = useState('')
-  const [scale, setScale] = useState<'moderada' | 'grande' | 'ampla'>('grande')
+  const [audience, setAudience] = useState('')
+  const [scale, setScale] = useState<'moderada' | 'grande' | 'ampla' | ''>('')
+  const [productInput, setProductInput] = useState('')
+  const [audienceInput, setAudienceInput] = useState('')
   const [preview, setPreview] = useState<StrategyPreview | null>(null)
   const [run, setRun] = useState<SearchRun | null>(null)
-  const [leads, setLeads] = useState<Lead[]>([])
+  const [error, setError] = useState('')
 
-  async function generatePreview() {
+  const scaleOptions = [
+    { value: 'moderada', label: '~40 leads', sub: 'Moderada' },
+    { value: 'grande',   label: '~80 leads', sub: 'Grande' },
+    { value: 'ampla',    label: '~120 leads', sub: 'Ampla' },
+  ]
+
+  function confirmProduct() {
+    const v = productInput.trim()
+    if (!v) return
+    setProduct(v)
+    setStep('audience')
+  }
+
+  function confirmAudience() {
+    const v = audienceInput.trim()
+    if (!v) return
+    setAudience(v)
+    setStep('scale')
+  }
+
+  async function confirmScale(s: 'moderada' | 'grande' | 'ampla') {
+    setScale(s)
+    setStep('preview')
+    setError('')
     setBusy(true)
-    setStatus('Montando preview da estratégia...')
+    setStatus('Montando plano de prospecção...')
     try {
-      const data = await api<{ preview: StrategyPreview }>('/api/prospect/preview', { method: 'POST', body: JSON.stringify({ prompt, product, scale }) })
+      const prompt = `Quero vender ${product} para ${audience}`
+      const data = await api<{ preview: StrategyPreview }>('/api/prospect/preview', {
+        method: 'POST',
+        body: JSON.stringify({ prompt, product, scale: s }),
+      })
       setPreview(data.preview)
-      setStatus('Preview pronto para revisão.')
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Erro ao gerar preview.')
+      setStatus('Plano pronto.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao gerar plano.')
+      setStep('scale')
     } finally {
       setBusy(false)
     }
@@ -528,75 +661,148 @@ function ProspectView({ isBusy, onRun, setStatus, setBusy }: { isBusy: boolean; 
   async function runSearch() {
     if (!preview) return
     setBusy(true)
-    setStatus('Executando busca com cache e deduplicação...')
+    setError('')
+    setStatus('Buscando leads...')
     try {
-      const data = await api<{ run: SearchRun; leads: Lead[] }>('/api/prospect/runs', { method: 'POST', body: JSON.stringify({ preview }) })
-      setRun(data.run)
-      setLeads(data.leads)
+      await api<{ run: SearchRun; leads: Lead[] }>('/api/prospect/runs', {
+        method: 'POST',
+        body: JSON.stringify({ preview }),
+      })
+      setRun({ status: 'done' } as unknown as SearchRun)
+      setStep('done')
       await onRun()
-      setStatus('Busca concluída. Revise os leads na aprovação manual.')
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Erro ao executar busca.')
+      setStatus('Busca concluída. Leads na fila de aprovação.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao executar busca.')
     } finally {
       setBusy(false)
     }
   }
 
+  function restart() {
+    setStep('product')
+    setProduct(''); setAudience(''); setScale(''); setProductInput(''); setAudienceInput('')
+    setPreview(null); setRun(null); setError('')
+  }
+
   return (
-    <section className="content-grid">
-      <article className="panel wide">
-        <PanelTitle title="Criar prospecção com agente" description="Descreva quem você quer prospectar. O agente monta a estratégia de busca antes de consumir APIs." />
-        <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={4} placeholder="Ex: Quero prospectar clínicas odontológicas em BH que não têm site, para oferecer landing page de captação pelo WhatsApp." />
-        <div className="form-grid three">
-          <label>
-            Produto <span className="field-optional">(opcional)</span>
-            <input value={product} placeholder="Ex: Landing Pages, Chatbot..." onChange={(event) => setProduct(event.target.value)} />
-          </label>
-          <label>Escala da busca
-            <select value={scale} onChange={(event) => setScale(event.target.value as typeof scale)}>
-              <option value="moderada">Moderada (~40 leads)</option>
-              <option value="grande">Grande (~80 leads)</option>
-              <option value="ampla">Ampla (~120 leads)</option>
-            </select>
-          </label>
-          <button className="primary-button" type="button" disabled={isBusy} onClick={generatePreview}>Gerar preview</button>
+    <div className="wizard">
+      <div className="wizard-header">
+        <span className="wizard-title">Nova campanha</span>
+        <div className="wizard-steps">
+          {['product', 'audience', 'scale', 'preview', 'done'].map((s, i) => (
+            <div key={s} className={`wizard-step-dot${step === s ? ' active' : ''} ${['product','audience','scale','preview','done'].indexOf(step) > i ? 'done' : ''}`} />
+          ))}
         </div>
-        {!product && <p className="intent-hint">Sem produto definido — a busca vai mapear problemas e oportunidades sem ancoragem comercial.</p>}
-      </article>
+      </div>
 
-      {preview && (
-        <article className="panel wide">
-          <PanelTitle title="Preview da estratégia" description="Confira como a busca será executada antes de aprovar." />
-          <div className="strategy-grid">
-            <InfoCard label="Produto" value={preview.strategy.product} />
-            <InfoCard label="Público" value={preview.strategy.audience} />
-            <InfoCard label="Região" value={preview.strategy.region} />
-            <InfoCard label="Leads úteis estimados" value={preview.strategy.estimatedUsefulRange} />
-            <InfoCard label="Chamadas previstas" value={preview.strategy.estimatedApiCalls} />
-            <InfoCard label="Risco de repetição" value={preview.strategy.repetitionRisk} />
-          </div>
-          <p className="agent-note">{preview.strategy.recommendation}</p>
-          <EditableList title="Keywords planejadas" items={preview.strategy.keywords} onChange={(keywords) => setPreview({ ...preview, strategy: { ...preview.strategy, keywords } })} />
-          <TwoColumnList leftTitle="Priorizar" left={preview.strategy.priorityCriteria} rightTitle="Descartar" right={preview.strategy.discardCriteria} />
-          <div className="button-row">
-            <button className="primary-button" type="button" disabled={isBusy} onClick={runSearch}>Aprovar e buscar leads</button>
-          </div>
-        </article>
-      )}
+      <div className="wizard-body">
 
-      {run && (
-        <article className="panel wide">
-          <PanelTitle title="Resultado da busca" description={run.summary} />
-          <div className="strategy-grid">
-            <InfoCard label="Únicos" value={run.stats.uniqueFound} />
-            <InfoCard label="Recomendados" value={run.stats.recommended} />
-            <InfoCard label="Médios" value={run.stats.medium} />
-            <InfoCard label="Cache" value={run.stats.cacheHits} />
+        {/* ── P1: Produto ── */}
+        <div className={`wz-block${step === 'product' ? ' visible' : ' past'}`}>
+          <div className="wz-q">O que você vende?</div>
+          {step === 'product' ? (
+            <div className="wz-answer-row">
+              <input
+                className="wz-input"
+                placeholder="Ex: Landing page, Chatbot, CRM..."
+                value={productInput}
+                onChange={(e) => setProductInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && confirmProduct()}
+                autoFocus
+              />
+              <button className="wz-btn" type="button" onClick={confirmProduct} disabled={!productInput.trim()}>→</button>
+            </div>
+          ) : (
+            <div className="wz-answer-given">{product}</div>
+          )}
+        </div>
+
+        {/* ── P2: Público ── */}
+        {(step === 'audience' || ['scale','preview','done'].includes(step)) && (
+          <div className={`wz-block${step === 'audience' ? ' visible' : ' past'}`}>
+            <div className="wz-q">Para quem e onde?</div>
+            {step === 'audience' ? (
+              <div className="wz-answer-row">
+                <input
+                  className="wz-input"
+                  placeholder="Ex: clínicas odontológicas em BH sem site"
+                  value={audienceInput}
+                  onChange={(e) => setAudienceInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && confirmAudience()}
+                  autoFocus
+                />
+                <button className="wz-btn" type="button" onClick={confirmAudience} disabled={!audienceInput.trim()}>→</button>
+              </div>
+            ) : (
+              <div className="wz-answer-given">{audience}</div>
+            )}
           </div>
-          <div className="lead-table">{leads.slice(0, 8).map((lead) => <LeadRow key={lead.id} lead={lead} onClick={() => undefined} />)}</div>
-        </article>
-      )}
-    </section>
+        )}
+
+        {/* ── P3: Volume ── */}
+        {(step === 'scale' || ['preview','done'].includes(step)) && (
+          <div className={`wz-block${step === 'scale' ? ' visible' : ' past'}`}>
+            <div className="wz-q">Quantos leads?</div>
+            {step === 'scale' ? (
+              <div className="wz-chips">
+                {scaleOptions.map((o) => (
+                  <button key={o.value} type="button" className="wz-chip" onClick={() => confirmScale(o.value as 'moderada' | 'grande' | 'ampla')} disabled={isBusy}>
+                    <span className="wz-chip-num">{o.label}</span>
+                    <span className="wz-chip-sub">{o.sub}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="wz-answer-given">{scaleOptions.find((o) => o.value === scale)?.label}</div>
+            )}
+          </div>
+        )}
+
+        {/* ── Preview carregando ── */}
+        {step === 'preview' && isBusy && (
+          <div className="wz-loading">
+            <div className="wz-spinner" />
+            <span>Montando plano com IA…</span>
+          </div>
+        )}
+
+        {/* ── Preview pronto ── */}
+        {step === 'preview' && !isBusy && preview && (
+          <div className="wz-block visible">
+            <div className="wz-q">Plano gerado</div>
+            <div className="wz-plan">
+              <div className="wz-plan-row"><span>Produto</span><b>{preview.strategy.product}</b></div>
+              <div className="wz-plan-row"><span>Público</span><b>{preview.strategy.audience}</b></div>
+              <div className="wz-plan-row"><span>Região</span><b>{preview.strategy.region}</b></div>
+              <div className="wz-plan-row"><span>Leads estimados</span><b>{preview.strategy.estimatedUsefulRange}</b></div>
+              <div className="wz-plan-row"><span>Chamadas API</span><b>{preview.strategy.estimatedApiCalls}</b></div>
+            </div>
+            <p className="wz-rec">{preview.strategy.recommendation}</p>
+            <div className="wz-plan-keywords">
+              {preview.strategy.keywords.slice(0, 8).map((k) => <span key={k} className="wz-kw">{k}</span>)}
+            </div>
+            <div className="wz-actions">
+              <button className="wz-run-btn" type="button" onClick={runSearch} disabled={isBusy}>Buscar leads agora</button>
+              <button className="wz-ghost-btn" type="button" onClick={restart}>Recomeçar</button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Done ── */}
+        {step === 'done' && (
+          <div className="wz-block visible">
+            <div className="wz-done">
+              <div className="wz-done-icon">✓</div>
+              <div className="wz-done-text">Leads encontrados e na fila de aprovação.</div>
+              <button className="wz-ghost-btn" type="button" onClick={restart}>Nova campanha</button>
+            </div>
+          </div>
+        )}
+
+        {error && <div className="wz-error">{error}</div>}
+      </div>
+    </div>
   )
 }
 
@@ -810,14 +1016,28 @@ function LeadReviewView({ title, leads, selectedLead, onSelect, onLeadUpdate, on
   )
 }
 
-function KanbanView({ assignments, followUps, onOpenCrm }: {
+function KanbanView({ assignments, followUps, onOpenCrm, onStage, onRefresh, onRunAction, user, onDelete }: {
   assignments: Assignment[]
   followUps: FollowUp[]
   onOpenCrm: (a: Assignment) => void
+  onStage: (a: Assignment, stage: string) => Promise<void>
+  onRefresh: () => Promise<void>
+  onRunAction: (msg: string, action: () => Promise<void>) => Promise<void>
+  user: SessionUser
+  onDelete: (a: Assignment) => Promise<void>
 }) {
+  const CARD_LIMIT = 50
   const [search, setSearch] = useState('')
   const [temperature, setTemperature] = useState('')
   const [onlyOverdue, setOnlyOverdue] = useState(false)
+  const [advancing, setAdvancing] = useState<Set<string>>(new Set())
+  const [colLimits, setColLimits] = useState<Record<string, number>>(
+    () => Object.fromEntries(stages.map((s) => [s, CARD_LIMIT]))
+  )
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkStage, setBulkStage] = useState('')
+  const [bulkBusy, setBulkBusy] = useState(false)
 
   const overdueIds = useMemo(() => new Set(
     followUps.filter((fu) => fu.isOverdue && fu.status === 'pending').map((fu) => fu.assignmentId).filter(Boolean)
@@ -843,129 +1063,365 @@ function KanbanView({ assignments, followUps, onOpenCrm }: {
     [filtered]
   )
 
-  const activeStageGroups = grouped.filter((g) => !['Perdido', 'Inativo'].includes(g.stage))
+  const pipelineStages = stages.filter((s) => !['Perdido', 'Inativo'].includes(s))
+
+  function nextStage(stage: string): string | null {
+    const idx = pipelineStages.indexOf(stage)
+    return idx >= 0 && idx < pipelineStages.length - 1 ? pipelineStages[idx + 1] : null
+  }
+
+  async function advance(e: React.MouseEvent, a: Assignment) {
+    e.stopPropagation()
+    const next = nextStage(a.stage)
+    if (!next || advancing.has(a.id)) return
+    setAdvancing((prev) => new Set(prev).add(a.id))
+    try { await onStage(a, next) }
+    finally { setAdvancing((prev) => { const s = new Set(prev); s.delete(a.id); return s }) }
+  }
 
   function exportColumn(stage: string, items: Assignment[]) {
     const rows = items.map((a) => [
-      a.lead.name,
-      a.lead.category || '',
-      a.lead.city || '',
-      a.lead.phone || '',
-      a.lead.website || '',
-      a.lead.email || '',
-      a.temperature,
-      a.nextAction || '',
-      a.approach || '',
-      a.ownerName || '',
+      a.lead.name, a.lead.category || '', a.lead.city || '', a.lead.phone || '',
+      a.lead.website || '', a.lead.email || '', a.temperature,
+      a.nextAction || '', a.approach || '', a.ownerName || '',
       a.lead.score != null ? String(a.lead.score) : '',
     ])
     const csv = toCsv([
       ['nome', 'nicho', 'cidade', 'whatsapp', 'site', 'email', 'temperatura', 'proximo_passo', 'abordagem', 'responsavel', 'score'],
       ...rows,
     ])
-    const slug = stage.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
-    downloadText(`pipeline-${slug}.csv`, csv, 'text/csv')
+    downloadText(`pipeline-${stage.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}.csv`, csv, 'text/csv')
+  }
+
+  const totalActive = filtered.filter((a) => !['Perdido', 'Inativo'].includes(a.stage)).length
+
+  function toggleSelectMode() {
+    setSelectMode((v) => !v)
+    setSelectedIds(new Set())
+    setBulkStage('')
+  }
+
+  function toggleCard(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  function selectAll(ids: string[]) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      ids.forEach((id) => next.add(id))
+      return next
+    })
+  }
+
+  async function applyBulk() {
+    if (!bulkStage || selectedIds.size === 0 || bulkBusy) return
+    setBulkBusy(true)
+    try {
+      await onRunAction(`Movendo ${selectedIds.size} lead(s) para ${bulkStage}...`, async () => {
+        await api('/api/assignments/bulk-stage', {
+          method: 'POST',
+          body: JSON.stringify({ ids: Array.from(selectedIds), stage: bulkStage }),
+        })
+        setSelectedIds(new Set())
+        setBulkStage('')
+        await onRefresh()
+      })
+    } finally {
+      setBulkBusy(false)
+    }
   }
 
   return (
     <div className="kanban-view">
-      {/* ── Filtros ── */}
-      <div className="kanban-filters">
-        <input
-          className="review-search"
-          type="search"
-          placeholder="Buscar por nome, nicho ou cidade…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ flex: 1, minWidth: 180 }}
-        />
-        <select value={temperature} onChange={(e) => setTemperature(e.target.value)} className="kanban-filter-select">
-          <option value="">Todas temperaturas</option>
-          <option value="quente">Quente</option>
-          <option value="morno">Morno</option>
-          <option value="frio">Frio</option>
-        </select>
-        <button
-          type="button"
-          className={`review-pill${onlyOverdue ? ' active' : ''}`}
-          onClick={() => setOnlyOverdue((v) => !v)}
-        >
-          Follow-ups atrasados
-        </button>
-        <span className="kanban-count">{filtered.length} lead{filtered.length !== 1 ? 's' : ''}</span>
+      {/* ── Top bar com busca e stats ── */}
+      <div className="kb-toolbar">
+        <div className="kb-search-wrap">
+          <svg className="kb-search-icon" viewBox="0 0 20 20" fill="none"><circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" strokeWidth="1.5"/><path d="M13.5 13.5L17 17" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+          <input
+            className="kb-search"
+            type="search"
+            placeholder="Buscar lead, nicho ou cidade…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <div className="kb-filters">
+          <select value={temperature} onChange={(e) => setTemperature(e.target.value)} className="kb-select">
+            <option value="">Temp.</option>
+            <option value="quente">🔥 Quente</option>
+            <option value="morno">🌡 Morno</option>
+            <option value="frio">❄ Frio</option>
+          </select>
+          <button type="button" className={`kb-pill${onlyOverdue ? ' on' : ''}`} onClick={() => setOnlyOverdue((v) => !v)}>
+            ⏰ Atrasados
+          </button>
+          <button type="button" className={`kb-pill${selectMode ? ' on' : ''}`} onClick={toggleSelectMode}>
+            ☑ Selecionar
+          </button>
+        </div>
+        <div className="kb-stat">
+          <span className="kb-stat-num">{totalActive}</span>
+          <span className="kb-stat-label">leads ativos</span>
+        </div>
       </div>
 
-      {/* ── Colunas ── */}
+      {/* ── Bulk action bar ── */}
+      {selectMode && (
+        <div className="kb-bulk-bar">
+          <span className="kb-bulk-count">{selectedIds.size} selecionado{selectedIds.size !== 1 ? 's' : ''}</span>
+          <select className="kb-select" value={bulkStage} onChange={(e) => setBulkStage(e.target.value)}>
+            <option value="">Mover para etapa…</option>
+            {stages.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <button type="button" className="kb-bulk-apply" onClick={applyBulk} disabled={!bulkStage || selectedIds.size === 0 || bulkBusy}>
+            {bulkBusy ? 'Movendo…' : `Mover ${selectedIds.size > 0 ? selectedIds.size : ''}`}
+          </button>
+          <button type="button" className="kb-pill" onClick={() => setSelectedIds(new Set())}>Limpar</button>
+        </div>
+      )}
+
+      {/* ── Board ── */}
       <div className="kanban-board">
-        {activeStageGroups.map((group) => (
-          <div className="kanban-col" key={group.stage}>
-            <div className="kanban-col-header">
-              <span>{group.stage}</span>
-              <div className="kanban-col-header-right">
-                <span className="kanban-col-count">{group.items.length}</span>
-                {group.items.length > 0 && (
+        {grouped.map((group) => {
+          const isLost = ['Perdido', 'Inativo'].includes(group.stage)
+          const color = stageColor[group.stage] ?? '#4a6080'
+          return (
+            <div className={`kb-col${isLost ? ' kb-col-lost' : ''}`} key={group.stage}>
+              {/* cabeçalho */}
+              <div className="kb-col-head" style={{ '--col-color': color } as React.CSSProperties}>
+                <div className="kb-col-dot" style={{ background: color }} />
+                <span className="kb-col-title">{group.stage}</span>
+                <span className="kb-col-badge">{group.items.length}</span>
+                {selectMode && group.items.length > 0 && (
                   <button
                     type="button"
-                    className="kanban-export-btn"
-                    title={`Exportar CSV — ${group.stage}`}
+                    className="kb-csv-btn"
+                    title="Selecionar todos nesta coluna"
+                    onClick={() => selectAll(group.items.map((a) => a.id))}
+                  >☑</button>
+                )}
+                {!selectMode && group.items.length > 0 && (
+                  <button
+                    type="button"
+                    className="kb-csv-btn"
+                    title="Exportar CSV"
                     onClick={(e) => { e.stopPropagation(); exportColumn(group.stage, group.items) }}
+                  >↓</button>
+                )}
+              </div>
+
+              {/* cards */}
+              <div className="kb-col-body">
+                {group.items.length === 0 && (
+                  <div className="kb-col-empty">vazio</div>
+                )}
+                {group.items.slice(0, colLimits[group.stage] ?? CARD_LIMIT).map((a) => {
+                  const fuCount = followUps.filter((fu) => fu.assignmentId === a.id && fu.status === 'pending').length
+                  const hasOverdue = overdueIds.has(a.id)
+                  const next = nextStage(a.stage)
+                  const isAdv = advancing.has(a.id)
+                  const isSelected = selectedIds.has(a.id)
+                  return (
+                    <div
+                      key={a.id}
+                      className={`kb2-card${hasOverdue ? ' overdue' : ''}${isLost ? ' lost' : ''}${isSelected ? ' kb2-card-selected' : ''}`}
+                      onClick={() => selectMode ? toggleCard(a.id) : onOpenCrm(a)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => e.key === 'Enter' && (selectMode ? toggleCard(a.id) : onOpenCrm(a))}
+                      style={{ '--stage-color': color } as React.CSSProperties}
+                    >
+                      {selectMode && (
+                        <div className="kb2-card-check">
+                          <input type="checkbox" checked={isSelected} onChange={() => toggleCard(a.id)} onClick={(e) => e.stopPropagation()} />
+                        </div>
+                      )}
+                      <div className="kb2-card-accent" />
+                      <div className="kb2-card-body">
+                        <div className="kb2-card-name">{a.lead.name}</div>
+                        {a.lead.category && <div className="kb2-card-cat">{a.lead.category}</div>}
+                        <div className="kb2-card-info">
+                          <span>{a.lead.city}</span>
+                          {a.lead.phone && <span className="kb2-wa">WA</span>}
+                        </div>
+                        {user.isAdmin && a.ownerName && <div className="kb2-card-owner">👤 {a.ownerName}</div>}
+                        {!isLost && a.nextAction && <div className="kb2-card-action">{a.nextAction}</div>}
+                        {!isLost && (
+                          <div className="kb2-card-foot">
+                            <span className={`kb2-temp kb2-temp-${a.temperature}`}>{a.temperature}</span>
+                            {fuCount > 0 && <span className="kb2-fu">{fuCount} fu{hasOverdue ? ' ⚠' : ''}</span>}
+                            {a.lead.score != null && <span className="kb2-score">{a.lead.score}</span>}
+                            {!selectMode && next && (
+                              <button
+                                type="button"
+                                className={`kb2-advance${isAdv ? ' busy' : ''}`}
+                                onClick={(e) => advance(e, a)}
+                                title={`→ ${next}`}
+                              >
+                                {isAdv ? '…' : '→'}
+                              </button>
+                            )}
+                            {!selectMode && (
+                              <button
+                                type="button"
+                                className="kb2-delete"
+                                onClick={(e) => { e.stopPropagation(); onDelete(a) }}
+                                title="Remover do pipeline"
+                              >🗑</button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+                {group.items.length > (colLimits[group.stage] ?? CARD_LIMIT) && (
+                  <button
+                    type="button"
+                    className="kb-col-more"
+                    onClick={() => setColLimits((prev) => ({ ...prev, [group.stage]: (prev[group.stage] ?? CARD_LIMIT) + CARD_LIMIT }))}
                   >
-                    ↓ CSV
+                    ver mais {group.items.length - (colLimits[group.stage] ?? CARD_LIMIT)}
                   </button>
                 )}
               </div>
             </div>
-            <div className="kanban-col-body">
-              {group.items.map((a) => {
-                const fuCount = followUps.filter((fu) => fu.assignmentId === a.id && fu.status === 'pending').length
-                const hasOverdue = overdueIds.has(a.id)
-                return (
-                  <button
-                    key={a.id}
-                    className={`kb-card${hasOverdue ? ' overdue' : ''}`}
-                    type="button"
-                    onClick={() => onOpenCrm(a)}
-                    title="Abrir no CRM para tratar"
-                  >
-                    <div className="kb-card-top">
-                      <b>{a.lead.name}</b>
-                      <span className={`temp-badge ${a.temperature}`}>{a.temperature}</span>
-                    </div>
-                    {a.lead.category && <div className="kb-card-category">{a.lead.category}</div>}
-                    <div className="kb-card-meta">{a.lead.city}{a.lead.phone ? ' · WA' : ''}</div>
-                    <div className="kb-card-action">{a.nextAction}</div>
-                    <div className="kb-card-footer">
-                      {fuCount > 0 && <span className="fu-badge">{fuCount} fu</span>}
-                      {a.lead.score != null && <span className="kb-score">{a.lead.score}</span>}
-                    </div>
-                  </button>
-                )
-              })}
-              {group.items.length === 0 && (
-                <div className="kb-empty">— vazio</div>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* ── Perdido / Inativo (colapsados) ── */}
-      <div className="kanban-lost-row">
-        {grouped.filter((g) => ['Perdido', 'Inativo'].includes(g.stage)).map((group) => (
-          group.items.length > 0 && (
-            <details key={group.stage} className="kanban-lost-group">
-              <summary>{group.stage} ({group.items.length})</summary>
-              <div className="kanban-lost-cards">
-                {group.items.map((a) => (
-                  <button key={a.id} className="kb-card lost" type="button" onClick={() => onOpenCrm(a)}>
-                    <b>{a.lead.name}</b>
-                    <div className="kb-card-meta">{a.lead.city}</div>
-                  </button>
-                ))}
-              </div>
-            </details>
           )
-        ))}
+        })}
+      </div>
+    </div>
+  )
+}
+
+function ApprovalView({ user, onRefreshCore, onCountChange }: {
+  user: SessionUser
+  onRefreshCore: () => Promise<void>
+  onCountChange: (n: number) => void
+}) {
+  const [leads, setLeads] = useState<Lead[]>([])
+  const [selected, setSelected] = useState<Lead | null>(null)
+  const [filterOwner, setFilterOwner] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [statusMsg, setStatusMsg] = useState('')
+
+  async function fetchLeads() {
+    try {
+      const data = await api<{ leads: Lead[] }>('/api/leads/approval')
+      setLeads(data.leads)
+      onCountChange(data.leads.length)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchLeads()
+    const interval = setInterval(fetchLeads, 30_000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const ownerNames = useMemo(() => {
+    const names = new Set<string>()
+    leads.forEach((l) => (l.foundByNames || []).forEach((n) => names.add(n)))
+    return Array.from(names).sort()
+  }, [leads])
+
+  const filtered = useMemo(() => {
+    if (!filterOwner) return leads
+    return leads.filter((l) => (l.foundByNames || []).includes(filterOwner))
+  }, [leads, filterOwner])
+
+  async function approve(lead: Lead) {
+    setBusy(true)
+    setStatusMsg('')
+    try {
+      await api(`/api/leads/${lead.id}/approve`, { method: 'POST' })
+      await fetchLeads()
+      await onRefreshCore()
+      if (selected?.id === lead.id) setSelected(null)
+      setStatusMsg('Lead aprovado e adicionado ao CRM.')
+    } catch (e) {
+      setStatusMsg(e instanceof Error ? e.message : 'Erro ao aprovar.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function discard(lead: Lead) {
+    setBusy(true)
+    setStatusMsg('')
+    try {
+      await api(`/api/leads/${lead.id}/discard`, { method: 'POST' })
+      await fetchLeads()
+      if (selected?.id === lead.id) setSelected(null)
+      setStatusMsg('Lead descartado.')
+    } catch (e) {
+      setStatusMsg(e instanceof Error ? e.message : 'Erro ao descartar.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="approval-view">
+      <div className="approval-sidebar">
+        <div className="approval-toolbar">
+          <span className="approval-count">{filtered.length} lead{filtered.length !== 1 ? 's' : ''} aguardando</span>
+          {user.isAdmin && ownerNames.length > 0 && (
+            <select value={filterOwner} onChange={(e) => setFilterOwner(e.target.value)} className="kb-select">
+              <option value="">Todos responsáveis</option>
+              {ownerNames.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          )}
+        </div>
+        {statusMsg && <div className="approval-status-msg">{statusMsg}</div>}
+        <div className="approval-list">
+          {loading && <div className="approval-empty">Carregando…</div>}
+          {!loading && filtered.length === 0 && <div className="approval-empty">Nenhum lead aguardando aprovação.</div>}
+          {filtered.map((lead) => (
+            <div
+              key={lead.id}
+              className={`approval-card${selected?.id === lead.id ? ' selected' : ''}`}
+              onClick={() => setSelected(lead)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => e.key === 'Enter' && setSelected(lead)}
+            >
+              <div className="approval-card-main">
+                <div className="approval-card-name">{lead.name}</div>
+                <div className="approval-card-meta">{[lead.category, lead.city].filter(Boolean).join(' · ')}</div>
+                {user.isAdmin && lead.foundByNames && lead.foundByNames.length > 0 && (
+                  <div className="approval-card-owner">👤 {lead.foundByNames[0]}</div>
+                )}
+              </div>
+              <div className="approval-card-right">
+                {lead.score != null && <span className="approval-score">{lead.score}</span>}
+                <div className="approval-card-btns">
+                  <button type="button" className="approval-btn-approve" disabled={busy} onClick={(e) => { e.stopPropagation(); approve(lead) }} title="Aprovar">✓</button>
+                  <button type="button" className="approval-btn-discard" disabled={busy} onClick={(e) => { e.stopPropagation(); discard(lead) }} title="Descartar">✕</button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="approval-detail">
+        {selected ? (
+          <LeadDetail
+            lead={selected}
+            onApprove={() => approve(selected)}
+            onDiscard={() => discard(selected)}
+            primaryLabel="Aprovar para CRM"
+            onLeadUpdate={(updated) => setSelected(updated)}
+          />
+        ) : (
+          <div className="approval-detail-empty">Selecione um lead para ver detalhes.</div>
+        )}
       </div>
     </div>
   )
@@ -1054,7 +1510,7 @@ function CrmView({
   whatsapp: WhatsAppStatus | null
   selected: Assignment | null
   onSelect: (a: Assignment) => void
-  onStage: (a: Assignment, stage: string) => void
+  onStage: (a: Assignment, stage: string) => Promise<void>
   onRelease: (a: Assignment) => void
   onCompleteFollowUp: (fu: FollowUp) => void
   onRefresh: () => Promise<void>
@@ -1954,6 +2410,346 @@ function TrojanView() {
   )
 }
 
+function CommandView({
+  assignments, approvalLeads, followUps, whatsapp,
+  onApprove, onDiscard, onStage, onRelease, onCompleteFollowUp, onRefresh,
+  isBusy, setStatus, setBusy,
+}: {
+  assignments: Assignment[]
+  approvalLeads: Lead[]
+  followUps: FollowUp[]
+  whatsapp: WhatsAppStatus | null
+  onApprove: (lead: Lead) => Promise<void>
+  onDiscard: (lead: Lead) => Promise<void>
+  onStage: (a: Assignment, stage: string) => Promise<void>
+  onRelease: (a: Assignment) => Promise<void>
+  onCompleteFollowUp: (fu: FollowUp) => Promise<void>
+  onRefresh: () => Promise<void>
+  isBusy: boolean
+  setStatus: (s: string) => void
+  setBusy: (b: boolean) => void
+}) {
+  const [search, setSearch] = useState('')
+  const [stageFilters, setStageFilters] = useState<Set<string>>(new Set())
+  const [tempFilters, setTempFilters] = useState<Set<string>>(new Set())
+  const [onlyFu, setOnlyFu] = useState(false)
+  const [onlyOverdue, setOnlyOverdue] = useState(false)
+  const [showApproval, setShowApproval] = useState(true)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [showProspect, setShowProspect] = useState(false)
+
+  const overdueIds = useMemo(() => new Set(
+    followUps.filter((fu) => fu.isOverdue && fu.status === 'pending').map((fu) => fu.assignmentId).filter(Boolean)
+  ), [followUps])
+
+  const filtered = useMemo(() => {
+    let r = assignments
+    if (search.trim()) { const q = search.toLowerCase(); r = r.filter((a) => a.lead.name.toLowerCase().includes(q) || (a.lead.category || '').toLowerCase().includes(q) || (a.lead.city || '').toLowerCase().includes(q)) }
+    if (stageFilters.size > 0) r = r.filter((a) => stageFilters.has(a.stage))
+    if (tempFilters.size > 0) r = r.filter((a) => tempFilters.has(a.temperature))
+    if (onlyFu) r = r.filter((a) => (a.pendingFollowUps || 0) > 0)
+    if (onlyOverdue) r = r.filter((a) => overdueIds.has(a.id))
+    return r
+  }, [assignments, search, stageFilters, tempFilters, onlyFu, onlyOverdue, overdueIds])
+
+  const stageCounts = useMemo(() => {
+    let base = assignments
+    if (search.trim()) { const q = search.toLowerCase(); base = base.filter((a) => a.lead.name.toLowerCase().includes(q) || (a.lead.category || '').toLowerCase().includes(q)) }
+    if (tempFilters.size > 0) base = base.filter((a) => tempFilters.has(a.temperature))
+    const m: Record<string, number> = {}
+    base.forEach((a) => { m[a.stage] = (m[a.stage] || 0) + 1 })
+    return m
+  }, [assignments, search, tempFilters])
+
+  const tempCounts = useMemo(() => {
+    let base = assignments
+    if (search.trim()) { const q = search.toLowerCase(); base = base.filter((a) => a.lead.name.toLowerCase().includes(q)) }
+    if (stageFilters.size > 0) base = base.filter((a) => stageFilters.has(a.stage))
+    const m: Record<string, number> = {}
+    base.forEach((a) => { m[a.temperature] = (m[a.temperature] || 0) + 1 })
+    return m
+  }, [assignments, search, stageFilters])
+
+  const maxStage = Math.max(...Object.values(stageCounts), 1)
+  const maxTemp = Math.max(...Object.values(tempCounts), 1)
+
+  function toggleStage(s: string) { const n = new Set(stageFilters); n.has(s) ? n.delete(s) : n.add(s); setStageFilters(n) }
+  function toggleTemp(t: string) { const n = new Set(tempFilters); n.has(t) ? n.delete(t) : n.add(t); setTempFilters(n) }
+
+  const hasFilters = !!(search || stageFilters.size || tempFilters.size || onlyFu || onlyOverdue)
+  const selected = assignments.find((a) => a.id === selectedId) || null
+  const activeStageList = stages.filter((s) => !['Perdido', 'Inativo'].includes(s))
+  const closedStageList = ['Perdido', 'Inativo']
+
+  return (
+    <div className="cmd-view">
+      {/* ── Filtros ── */}
+      <aside className="cmd-filters">
+        <div className="cmd-filter-header">
+          <span>Filtros</span>
+          {hasFilters && <button type="button" className="cmd-clear" onClick={() => { setSearch(''); setStageFilters(new Set()); setTempFilters(new Set()); setOnlyFu(false); setOnlyOverdue(false) }}>Limpar tudo</button>}
+        </div>
+        <input className="cmd-search" type="search" placeholder="Buscar lead, nicho, cidade…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <div className="cmd-quick-toggles">
+          <button type="button" className={`cmd-toggle${onlyFu ? ' active' : ''}`} onClick={() => setOnlyFu((v) => !v)}>Com FU</button>
+          <button type="button" className={`cmd-toggle${onlyOverdue ? ' active' : ''}`} onClick={() => setOnlyOverdue((v) => !v)}>Atrasados</button>
+        </div>
+        <div className="cmd-filter-section">
+          <div className="cmd-filter-title">Etapa</div>
+          {[...activeStageList, ...closedStageList].map((stage) => {
+            const count = stageCounts[stage] || 0
+            const on = stageFilters.has(stage)
+            return (
+              <button key={stage} type="button" className={`cmd-filter-row${on ? ' checked' : ''}`} onClick={() => toggleStage(stage)}>
+                <span className={`cmd-check${on ? ' on' : ''}`} />
+                <span className="cmd-filter-label">{stage}</span>
+                <div className="cmd-bar-wrap"><div className="cmd-bar" style={{ width: `${(count / maxStage) * 100}%` }} /></div>
+                <span className="cmd-filter-count">{count}</span>
+              </button>
+            )
+          })}
+        </div>
+        <div className="cmd-filter-section">
+          <div className="cmd-filter-title">Temperatura</div>
+          {['quente', 'morno', 'frio'].map((temp) => {
+            const count = tempCounts[temp] || 0
+            const on = tempFilters.has(temp)
+            return (
+              <button key={temp} type="button" className={`cmd-filter-row${on ? ' checked' : ''}`} onClick={() => toggleTemp(temp)}>
+                <span className={`cmd-check${on ? ' on' : ''}`} />
+                <span className="cmd-filter-label">{temp}</span>
+                <div className="cmd-bar-wrap"><div className="cmd-bar" style={{ width: `${(count / maxTemp) * 100}%` }} /></div>
+                <span className="cmd-filter-count">{count}</span>
+              </button>
+            )
+          })}
+        </div>
+        {approvalLeads.length > 0 && (
+          <div className="cmd-filter-section">
+            <div className="cmd-filter-title">Fila</div>
+            <button type="button" className={`cmd-filter-row${showApproval ? ' checked' : ''}`} onClick={() => setShowApproval((v) => !v)}>
+              <span className={`cmd-check${showApproval ? ' on' : ''}`} />
+              <span className="cmd-filter-label">Aprovação pendente</span>
+              <span className="cmd-filter-count">{approvalLeads.length}</span>
+            </button>
+          </div>
+        )}
+      </aside>
+
+      {/* ── Lista ── */}
+      <div className="cmd-list">
+        <div className="cmd-list-header">
+          <span className="cmd-list-count">{filtered.length} lead{filtered.length !== 1 ? 's' : ''}{showApproval && approvalLeads.length > 0 ? ` · ${approvalLeads.length} aguardando` : ''}</span>
+          <button type="button" className="btn-primary small" onClick={() => setShowProspect(true)}>+ Prospectar</button>
+        </div>
+        {showApproval && approvalLeads.length > 0 && (
+          <div className="cmd-approval-section">
+            <div className="cmd-section-label">⏳ Aprovação pendente</div>
+            {approvalLeads.slice(0, 5).map((lead) => (
+              <div key={lead.id} className="cmd-row approval-row">
+                <div className="cmd-row-main">
+                  <span className="cmd-row-name">{lead.name}</span>
+                  <span className="cmd-row-meta">{[lead.category, lead.city].filter(Boolean).join(' · ')}</span>
+                </div>
+                {lead.score != null && <span className="cmd-score">{lead.score}</span>}
+                <div className="cmd-row-actions-inline">
+                  <button type="button" className="btn-ghost small" onClick={() => onApprove(lead)}>Aprovar</button>
+                  <button type="button" className="btn-ghost small" style={{ color: '#f87171' }} onClick={() => onDiscard(lead)}>✕</button>
+                </div>
+              </div>
+            ))}
+            {approvalLeads.length > 5 && <div className="cmd-more">+{approvalLeads.length - 5} mais na fila</div>}
+          </div>
+        )}
+        <div className="cmd-rows">
+          {filtered.map((a) => {
+            const aFu = followUps.filter((fu) => fu.assignmentId === a.id && fu.status === 'pending')
+            const isOvr = overdueIds.has(a.id)
+            return (
+              <button key={a.id} type="button" className={`cmd-row${selectedId === a.id ? ' active' : ''}${isOvr ? ' overdue' : ''}`} onClick={() => setSelectedId(a.id)}>
+                <div className="cmd-row-main">
+                  <div className="cmd-row-top">
+                    <span className="cmd-row-name">{a.lead.name}</span>
+                    <span className={`cmd-stage-badge s-${a.stage.split(' ')[0].toLowerCase()}`}>{a.stage}</span>
+                  </div>
+                  <div className="cmd-row-bottom">
+                    <span className="cmd-row-meta">{[a.lead.category, a.lead.city].filter(Boolean).join(' · ')}</span>
+                    <div className="cmd-row-tags">
+                      <span className={`temp-badge ${a.temperature}`}>{a.temperature}</span>
+                      {aFu.length > 0 && <span className="fu-badge">{aFu.length}</span>}
+                      {a.lead.score != null && <span className="cmd-score">{a.lead.score}</span>}
+                    </div>
+                  </div>
+                  {a.nextAction && <div className="cmd-next-action">→ {a.nextAction}</div>}
+                </div>
+              </button>
+            )
+          })}
+          {filtered.length === 0 && assignments.length > 0 && <div className="cmd-empty">Nenhum lead com esses filtros.</div>}
+          {assignments.length === 0 && <div className="cmd-empty">CRM vazio. Clique em "+ Prospectar".</div>}
+        </div>
+      </div>
+
+      {/* ── Detalhe ── */}
+      <div className="cmd-detail">
+        {selected ? (
+          <CmdDetail
+            assignment={selected}
+            followUps={followUps.filter((fu) => fu.assignmentId === selected.id && fu.status === 'pending')}
+            whatsapp={whatsapp}
+            onStage={onStage}
+            onRelease={onRelease}
+            onCompleteFollowUp={onCompleteFollowUp}
+            onRefresh={onRefresh}
+          />
+        ) : (
+          <div className="cmd-empty-detail">Selecione um lead para ver detalhes e agir.</div>
+        )}
+      </div>
+
+      {/* ── Modal prospecção ── */}
+      {showProspect && (
+        <div className="cmd-modal-overlay" onClick={() => setShowProspect(false)}>
+          <div className="cmd-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="cmd-modal-header">
+              <h2>Criar Prospecção</h2>
+              <button type="button" className="cmd-modal-close" onClick={() => setShowProspect(false)}>✕</button>
+            </div>
+            <div className="cmd-modal-body">
+              <ProspectView isBusy={isBusy} onRun={async () => { await onRefresh(); setShowProspect(false) }} setStatus={setStatus} setBusy={setBusy} />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CmdDetail({
+  assignment, followUps, whatsapp, onStage, onRelease, onCompleteFollowUp, onRefresh,
+}: {
+  assignment: Assignment
+  followUps: FollowUp[]
+  whatsapp: WhatsAppStatus | null
+  onStage: (a: Assignment, stage: string) => Promise<void>
+  onRelease: (a: Assignment) => Promise<void>
+  onCompleteFollowUp: (fu: FollowUp) => Promise<void>
+  onRefresh: () => Promise<void>
+}) {
+  const [approach, setApproach] = useState(assignment.approach || '')
+  const [nextAction, setNextAction] = useState(assignment.nextAction || '')
+  const [temperature, setTemperature] = useState(assignment.temperature || 'morno')
+  const [isSaving, setIsSaving] = useState(false)
+  const [isSending, setIsSending] = useState(false)
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [sendStatus, setSendStatus] = useState<{ ok: boolean; msg: string } | null>(null)
+
+  useEffect(() => {
+    setApproach(assignment.approach || '')
+    setNextAction(assignment.nextAction || '')
+    setTemperature(assignment.temperature || 'morno')
+    setSendStatus(null)
+  }, [assignment.id])
+
+  async function save() {
+    setIsSaving(true)
+    try {
+      await api(`/api/assignments/${assignment.id}/stage`, { method: 'POST', body: JSON.stringify({ stage: assignment.stage, approach, nextAction, temperature }) })
+      await onRefresh()
+    } catch { /* ignore */ } finally { setIsSaving(false) }
+  }
+
+  async function generate() {
+    setIsGenerating(true)
+    try {
+      const d = await api<{ approach: string }>('/api/messages/generate', { method: 'POST', body: JSON.stringify({ leadId: assignment.lead.id }) })
+      setApproach(d.approach)
+    } catch { /* ignore */ } finally { setIsGenerating(false) }
+  }
+
+  async function send() {
+    setIsSending(true)
+    setSendStatus(null)
+    try {
+      await api('/api/messages/send', { method: 'POST', body: JSON.stringify({ number: assignment.lead.phone, text: approach, leadId: assignment.lead.id }) })
+      setSendStatus({ ok: true, msg: 'Mensagem enviada!' })
+      await onRefresh()
+    } catch (err) {
+      setSendStatus({ ok: false, msg: err instanceof Error ? err.message : 'Erro.' })
+    } finally { setIsSending(false) }
+  }
+
+  const waConnected = whatsapp?.connectionStatus === 'open'
+
+  return (
+    <div className="cmd-detail-inner">
+      <LeadDetail lead={assignment.lead} />
+      <div className="cmd-detail-controls">
+        <label>Etapa
+          <select value={assignment.stage} onChange={(e) => onStage(assignment, e.target.value)}>
+            {stages.map((s) => <option key={s}>{s}</option>)}
+          </select>
+        </label>
+        <label>Temperatura
+          <select value={temperature} onChange={(e) => setTemperature(e.target.value)} onBlur={save}>
+            <option value="frio">Frio</option>
+            <option value="morno">Morno</option>
+            <option value="quente">Quente</option>
+          </select>
+        </label>
+      </div>
+      <div className="cmd-detail-field">
+        <label>Próxima ação
+          <input value={nextAction} onChange={(e) => setNextAction(e.target.value)} onBlur={save} placeholder="Ex: Ligar amanhã de manhã" />
+        </label>
+      </div>
+      <div className="cmd-detail-field">
+        <label>Abordagem / Mensagem</label>
+        <textarea value={approach} onChange={(e) => setApproach(e.target.value)} rows={4} placeholder="Mensagem de abordagem…" />
+        <div className="cmd-send-row">
+          <button type="button" className="btn-ghost small" onClick={save} disabled={isSaving}>{isSaving ? 'Salvando…' : 'Salvar'}</button>
+          <button type="button" className="btn-ghost small" onClick={generate} disabled={isGenerating}>{isGenerating ? 'Gerando…' : 'Gerar IA'}</button>
+          <button type="button" className="btn-primary small" onClick={send} disabled={isSending || !waConnected || !approach.trim() || !assignment.lead.phone} title={!waConnected ? 'WhatsApp não conectado' : !assignment.lead.phone ? 'Sem telefone' : ''}>
+            <span className={`ws-dot ${waConnected ? 'open' : 'close'}`} style={{ marginRight: 5 }} />
+            {isSending ? 'Enviando…' : 'Enviar WA'}
+          </button>
+        </div>
+        {sendStatus && <p className={sendStatus.ok ? 'form-success' : 'form-error'} style={{ marginTop: 6 }}>{sendStatus.msg}</p>}
+      </div>
+      {followUps.length > 0 && (
+        <div className="cmd-detail-field">
+          <strong style={{ fontSize: 12, color: '#8a99b0', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Follow-ups pendentes ({followUps.length})</strong>
+          {followUps.map((fu) => (
+            <div key={fu.id} className={`fu-row${fu.isOverdue ? ' overdue' : ''}`}>
+              <div className="fu-meta">
+                <span>{formatDate(fu.dueAt)} · passo {fu.step}</span>
+                <p>{fu.text}</p>
+              </div>
+              <div className="fu-actions">
+                <button className="btn-ghost small" type="button" onClick={() => onCompleteFollowUp(fu)}>Concluir</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {assignment.history && assignment.history.length > 0 && (
+        <div className="cmd-detail-field">
+          <strong style={{ fontSize: 12, color: '#8a99b0', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Histórico</strong>
+          {assignment.history.slice(-5).reverse().map((h, i) => (
+            <div key={i} className="crm-history-item">
+              <span className="crm-history-type">{h.type}</span>
+              <span className="crm-history-text">{h.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="cmd-detail-field">
+        <button type="button" className="btn-ghost small" style={{ color: '#f87171' }} onClick={() => onRelease(assignment)}>Liberar lead do meu CRM</button>
+      </div>
+    </div>
+  )
+}
+
 function LeadDetail({ lead, onApprove, onDiscard, primaryLabel, onLeadUpdate }: { lead: Lead; onApprove?: () => void; onDiscard?: () => void; primaryLabel?: string; onLeadUpdate?: (lead: Lead) => void }) {
   const [cnpjInput, setCnpjInput] = useState('')
   const [cnpjBusy, setCnpjBusy] = useState(false)
@@ -2132,25 +2928,12 @@ function InfoCard({ label, value }: { label: string; value: string | number }) {
   return <div className="info-card"><span>{label}</span><strong>{value}</strong></div>
 }
 
-function Metric({ label, value }: { label: string; value: number }) {
-  return <article className="metric"><span>{label}</span><strong>{value}</strong></article>
-}
-
 function PanelTitle({ title, description }: { title: string; description: string }) {
   return <div className="panel-title"><div><h2>{title}</h2><p>{description}</p></div></div>
 }
 
 function Empty({ text }: { text: string }) {
   return <div className="empty-state">{text}</div>
-}
-
-function NavButton({ id, current, label, badge, onClick }: { id: View; current: View; label: string; badge?: number; onClick: (view: View) => void }) {
-  return (
-    <button className={id === current ? 'active' : ''} type="button" onClick={() => onClick(id)}>
-      {label}
-      {badge && badge > 0 ? <span className="nav-badge">{badge > 99 ? '99+' : badge}</span> : null}
-    </button>
-  )
 }
 
 function Brand() {
@@ -2177,6 +2960,7 @@ function greeting() {
 function viewTitle(view: View, user: SessionUser) {
   const map: Record<View, string> = {
     day: `${greeting()}, ${user.name.split(' ')[0]}`,
+    command: 'Central de Prospecção',
     prospect: 'Criar Prospecção',
     approval: 'Aprovação Manual',
     pool: 'Base Geral',
@@ -2193,6 +2977,7 @@ function viewTitle(view: View, user: SessionUser) {
 function viewDescription(view: View) {
   const map: Record<View, string> = {
     day: 'Comece pelo que precisa de ação hoje.',
+    command: 'Filtre, aja e prospecte em uma tela só.',
     prospect: 'O agente planeja a busca antes de consumir APIs e gerar novos leads.',
     approval: 'Só aprove para o CRM os leads que fazem sentido abordar.',
     pool: 'Leads sem conversa ativa ficam disponíveis para reativação.',

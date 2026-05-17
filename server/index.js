@@ -260,12 +260,50 @@ app.post('/api/assignments/:id/stage', async (req, res) => {
   if (req.body.stage && req.body.stage !== prevStage) {
     assignment.history.push({ at: assignment.updatedAt, type: 'stage', text: `Etapa alterada para ${assignment.stage}.` })
   }
+  if (req.body.note) {
+    assignment.history.push({ at: assignment.updatedAt, type: 'note', text: req.body.note })
+  }
 
   const lead = store.leadPool.find((item) => item.id === assignment.leadId)
   if (lead && ['Perdido', 'Inativo'].includes(assignment.stage)) releaseLead(store, lead, assignment, user, assignment.stage.toLowerCase())
 
   await writeStore(store)
   res.json({ assignment: assignmentView(store, assignment) })
+})
+
+app.delete('/api/assignments/:id', async (req, res) => {
+  const store = await readStore()
+  const user = await getCurrentUser(req, store)
+  const assignment = store.assignments.find((item) => item.id === req.params.id)
+  if (!assignment) return res.status(404).json({ error: 'Atendimento não encontrado.' })
+  if (!canAccessAssignment(user, assignment)) return res.status(403).json({ error: 'Atendimento pertence a outro vendedor.' })
+  const lead = store.leadPool.find((item) => item.id === assignment.leadId)
+  releaseLead(store, lead, assignment, user, 'Removido do pipeline.')
+  await writeStore(store)
+  res.json({ ok: true })
+})
+
+app.post('/api/assignments/bulk-stage', async (req, res) => {
+  const store = await readStore()
+  const user = await getCurrentUser(req, store)
+  const { ids, stage } = req.body
+  if (!Array.isArray(ids) || !stage) return res.status(400).json({ error: 'ids[] e stage obrigatórios.' })
+  const updated = []
+  for (const id of ids) {
+    const assignment = store.assignments.find((item) => item.id === id)
+    if (!assignment || !canAccessAssignment(user, assignment)) continue
+    const prevStage = assignment.stage
+    assignment.stage = stage
+    assignment.updatedAt = new Date().toISOString()
+    if (stage !== prevStage) {
+      assignment.history.push({ at: assignment.updatedAt, type: 'stage', text: `Etapa alterada para ${stage}.` })
+    }
+    const lead = store.leadPool.find((item) => item.id === assignment.leadId)
+    if (lead && ['Perdido', 'Inativo'].includes(stage)) releaseLead(store, lead, assignment, user, stage.toLowerCase())
+    updated.push(id)
+  }
+  await writeStore(store)
+  res.json({ updated })
 })
 
 app.post('/api/assignments/:id/release', async (req, res) => {
@@ -1040,6 +1078,7 @@ function leadListView(store, lead) {
     lastOwnerId: lead.lastOwnerId || null,
     lastOwnerName: lead.lastOwnerId ? (store.users.find((u) => u.id === lead.lastOwnerId)?.name || null) : null,
     lastContactAt: lead.lastContactAt || null,
+    foundByNames: (lead.foundByIds || []).map((id) => store.users.find((u) => u.id === id)?.name || null).filter(Boolean),
   }
 }
 
