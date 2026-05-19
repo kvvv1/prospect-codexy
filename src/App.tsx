@@ -150,6 +150,15 @@ type WhatsAppStatus = {
   profileName?: string | null
 }
 
+type SiteCheckResult = {
+  id: string
+  name: string
+  url: string
+  status: number | null
+  responseMs: number | null
+  error: string | null
+}
+
 type InboxMessage = {
   id: string
   leadId: string | null
@@ -1308,6 +1317,7 @@ function ApprovalView({ user, onRefreshCore, onCountChange }: {
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [statusMsg, setStatusMsg] = useState('')
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set())
 
   async function fetchLeads() {
     try {
@@ -1367,6 +1377,55 @@ function ApprovalView({ user, onRefreshCore, onCountChange }: {
     }
   }
 
+  async function bulkApprove() {
+    setBusy(true)
+    setStatusMsg('')
+    try {
+      const data = await api<{ approved: number; failed: number }>('/api/leads/bulk-approve', {
+        method: 'POST',
+        body: JSON.stringify({ ids: Array.from(checkedIds) }),
+      })
+      setCheckedIds(new Set())
+      await fetchLeads()
+      await onRefreshCore()
+      if (selected && checkedIds.has(selected.id)) setSelected(null)
+      setStatusMsg(`${data.approved} lead(s) aprovado(s).${data.failed ? ` ${data.failed} falha(s).` : ''}`)
+    } catch (e) {
+      setStatusMsg(e instanceof Error ? e.message : 'Erro ao aprovar em massa.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function bulkDiscard() {
+    setBusy(true)
+    setStatusMsg('')
+    try {
+      const data = await api<{ discarded: number }>('/api/leads/bulk-discard', {
+        method: 'POST',
+        body: JSON.stringify({ ids: Array.from(checkedIds) }),
+      })
+      setCheckedIds(new Set())
+      await fetchLeads()
+      if (selected && checkedIds.has(selected.id)) setSelected(null)
+      setStatusMsg(`${data.discarded} lead(s) descartado(s).`)
+    } catch (e) {
+      setStatusMsg(e instanceof Error ? e.message : 'Erro ao descartar em massa.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function toggleCheck(id: string, e: React.MouseEvent | React.ChangeEvent) {
+    e.stopPropagation()
+    setCheckedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   return (
     <div className="approval-view">
       <div className="approval-sidebar">
@@ -1379,6 +1438,23 @@ function ApprovalView({ user, onRefreshCore, onCountChange }: {
             </select>
           )}
         </div>
+        {checkedIds.size > 0 && (
+          <div className="bulk-bar">
+            <button
+              type="button"
+              className={`bulk-select-all${checkedIds.size === filtered.length ? ' active' : ''}`}
+              onClick={() => setCheckedIds(checkedIds.size === filtered.length ? new Set() : new Set(filtered.map((l) => l.id)))}
+            >
+              <input type="checkbox" readOnly checked={checkedIds.size === filtered.length} style={{ pointerEvents: 'none' }} />
+              {checkedIds.size === filtered.length ? 'Desmarcar todos' : 'Selecionar todos'}
+            </button>
+            <span className="bulk-count">{checkedIds.size} selecionado{checkedIds.size !== 1 ? 's' : ''}</span>
+            <div className="bulk-actions">
+              <button type="button" className="bulk-btn" style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }} disabled={busy} onClick={bulkApprove}>Aprovar</button>
+              <button type="button" className="bulk-btn" style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }} disabled={busy} onClick={bulkDiscard}>Descartar</button>
+            </div>
+          </div>
+        )}
         {statusMsg && <div className="approval-status-msg">{statusMsg}</div>}
         <div className="approval-list">
           {loading && <div className="approval-empty">Carregando…</div>}
@@ -1386,12 +1462,19 @@ function ApprovalView({ user, onRefreshCore, onCountChange }: {
           {filtered.map((lead) => (
             <div
               key={lead.id}
-              className={`approval-card${selected?.id === lead.id ? ' selected' : ''}`}
+              className={`approval-card${selected?.id === lead.id ? ' selected' : ''}${checkedIds.has(lead.id) ? ' checked' : ''}`}
               onClick={() => setSelected(lead)}
               role="button"
               tabIndex={0}
               onKeyDown={(e) => e.key === 'Enter' && setSelected(lead)}
             >
+              <input
+                type="checkbox"
+                className="approval-check"
+                checked={checkedIds.has(lead.id)}
+                onClick={(e) => toggleCheck(lead.id, e)}
+                onChange={() => {}}
+              />
               <div className="approval-card-main">
                 <div className="approval-card-name">{lead.name}</div>
                 <div className="approval-card-meta">{[lead.category, lead.city].filter(Boolean).join(' · ')}</div>
@@ -1898,7 +1981,7 @@ function WhatsAppView({ whatsapp, qrCode, onConnect, onRefresh }: { whatsapp: Wh
 }
 
 function AdminView({ dashboard, runs }: { dashboard: Dashboard | null; assignments?: Assignment[]; runs: SearchRun[] }) {
-  const [adminTab, setAdminTab] = useState<'users' | 'trojan'>('users')
+  const [adminTab, setAdminTab] = useState<'users' | 'trojan' | 'sites'>('users')
   const [users, setUsers] = useState<AdminUser[]>([])
   const [form, setForm] = useState({ name: '', username: '', password: '', role: 'Comercial' })
   const [editing, setEditing] = useState<AdminUser | null>(null)
@@ -2034,9 +2117,11 @@ function AdminView({ dashboard, runs }: { dashboard: Dashboard | null; assignmen
       <div className="admin-tabs">
         <button type="button" className={adminTab === 'users' ? 'active' : ''} onClick={() => setAdminTab('users')}>Gestão</button>
         <button type="button" className={adminTab === 'trojan' ? 'active' : ''} onClick={() => setAdminTab('trojan')}>Cavalo de Troia</button>
+        <button type="button" className={adminTab === 'sites' ? 'active' : ''} onClick={() => setAdminTab('sites')}>Sites Quebrados</button>
       </div>
 
       {adminTab === 'trojan' && <TrojanView />}
+      {adminTab === 'sites' && <SiteHealthView />}
 
       {adminTab === 'users' && (
     <section className="content-grid">
@@ -2197,6 +2282,106 @@ function AdminView({ dashboard, runs }: { dashboard: Dashboard | null; assignmen
     </section>
       )}
     </>
+  )
+}
+
+function SiteHealthView() {
+  const [results, setResults] = useState<SiteCheckResult[]>([])
+  const [scanning, setScanning] = useState(false)
+  const [scanned, setScanned] = useState(false)
+  const [error, setError] = useState('')
+  const [filter, setFilter] = useState<'all' | 'error' | 'slow' | 'ok'>('all')
+  const [cityFilter, setCityFilter] = useState('')
+
+  async function scan() {
+    setScanning(true)
+    setError('')
+    setResults([])
+    setScanned(false)
+    try {
+      const body: Record<string, string> = {}
+      if (cityFilter.trim()) body.city = cityFilter.trim()
+      const data = await api<{ results: SiteCheckResult[]; total: number }>('/api/admin/site-health', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      })
+      setResults(data.results)
+      setScanned(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao escanear.')
+    } finally {
+      setScanning(false)
+    }
+  }
+
+  const errorCount = results.filter((r) => r.error || (r.status != null && r.status >= 400)).length
+  const slowCount = results.filter((r) => !r.error && r.responseMs != null && r.responseMs > 3000).length
+  const okCount = results.filter((r) => !r.error && r.status != null && r.status < 400).length
+
+  const filtered = useMemo(() => {
+    if (filter === 'error') return results.filter((r) => r.error || (r.status != null && r.status >= 400))
+    if (filter === 'slow') return results.filter((r) => !r.error && r.responseMs != null && r.responseMs > 3000)
+    if (filter === 'ok') return results.filter((r) => !r.error && r.status != null && r.status < 400)
+    return results
+  }, [results, filter])
+
+  return (
+    <section className="content-grid">
+      <article className="panel wide">
+        <PanelTitle title="Scanner de Sites" description="Verifica sites dos leads: status HTTP, tempo de resposta, erros 404 e timeouts." />
+        {error && <p className="form-error">{error}</p>}
+        <div className="site-health-toolbar">
+          <input
+            className="kb-select"
+            style={{ width: 200 }}
+            placeholder="Filtrar por cidade (ex: Belo Horizonte)"
+            value={cityFilter}
+            onChange={(e) => setCityFilter(e.target.value)}
+            disabled={scanning}
+          />
+          <button className="btn-primary" type="button" onClick={scan} disabled={scanning}>
+            {scanning ? 'Escaneando…' : scanned ? 'Escanear novamente' : 'Iniciar Scan'}
+          </button>
+          {scanning && <span className="site-health-hint">Verificando sites{cityFilter ? ` em ${cityFilter}` : ''}…</span>}
+          {scanned && !scanning && (
+            <div className="site-health-filters">
+              <button type="button" className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>Todos ({results.length})</button>
+              <button type="button" className={`sh-filter-err${filter === 'error' ? ' active' : ''}`} onClick={() => setFilter('error')}>Erros/404 ({errorCount})</button>
+              <button type="button" className={`sh-filter-slow${filter === 'slow' ? ' active' : ''}`} onClick={() => setFilter('slow')}>Lentos &gt;3s ({slowCount})</button>
+              <button type="button" className={`sh-filter-ok${filter === 'ok' ? ' active' : ''}`} onClick={() => setFilter('ok')}>OK ({okCount})</button>
+            </div>
+          )}
+        </div>
+        {scanned && filtered.length > 0 && (
+          <div className="site-health-table">
+            <div className="site-health-head">
+              <span>Lead</span>
+              <span>URL</span>
+              <span>Status</span>
+              <span>Tempo</span>
+            </div>
+            {filtered.map((r) => {
+              const isErr = r.error || (r.status != null && r.status >= 400)
+              const isSlow = !r.error && r.responseMs != null && r.responseMs > 3000
+              return (
+                <div key={r.id} className={`site-health-row ${isErr ? 'sh-row-err' : isSlow ? 'sh-row-slow' : 'sh-row-ok'}`}>
+                  <span className="sh-name">{r.name}</span>
+                  <a className="sh-url" href={r.url} target="_blank" rel="noreferrer">{r.url}</a>
+                  <span className="sh-status">
+                    {r.error
+                      ? <span className="sh-badge sh-badge-err">{r.error === 'timeout' ? 'Timeout' : 'Erro'}</span>
+                      : <span className={`sh-badge ${r.status != null && r.status < 400 ? 'sh-badge-ok' : 'sh-badge-err'}`}>{r.status}</span>
+                    }
+                  </span>
+                  <span className="sh-time">{r.responseMs != null ? `${r.responseMs}ms` : '—'}</span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+        {scanned && filtered.length === 0 && <Empty text="Nenhum resultado nessa categoria." />}
+      </article>
+    </section>
   )
 }
 

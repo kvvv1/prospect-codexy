@@ -823,6 +823,105 @@ app.post('/api/admin/trojan/send', requireAuth, async (req, res, next) => {
   }
 })
 
+app.post('/api/leads/bulk-approve', requireAuth, async (req, res) => {
+  const store = await readStore()
+  const user = await getCurrentUser(req, store)
+  if (!isAdmin(user)) return res.status(403).json({ error: 'Acesso restrito a administradores.' })
+  const ids = Array.isArray(req.body.ids) ? req.body.ids : []
+  if (!ids.length) return res.status(400).json({ error: 'Nenhum lead selecionado.' })
+  let approved = 0
+  let failed = 0
+  for (const id of ids) {
+    const result = claimLead(store, user, id, {})
+    if (result.error) failed += 1
+    else approved += 1
+  }
+  await writeStore(store)
+  res.json({ approved, failed })
+})
+
+app.post('/api/leads/bulk-discard', requireAuth, async (req, res) => {
+  const store = await readStore()
+  const user = await getCurrentUser(req, store)
+  if (!isAdmin(user)) return res.status(403).json({ error: 'Acesso restrito a administradores.' })
+  const ids = Array.isArray(req.body.ids) ? req.body.ids : []
+  if (!ids.length) return res.status(400).json({ error: 'Nenhum lead selecionado.' })
+  let discarded = 0
+  for (const id of ids) {
+    const lead = store.leadPool.find((item) => item.id === id)
+    if (!lead) continue
+    if (lead.availability === 'pending_approval') {
+      lead.status = 'available'
+      lead.availability = 'available'
+      lead.lastOwnerId = user.id
+      lead.discardedReason = null
+    } else {
+      lead.status = 'discarded'
+      lead.availability = 'discarded'
+      lead.discardedReason = 'Descartado em massa.'
+    }
+    addActivity(store, { type: 'lead_discarded', userId: user.id, leadId: lead.id, text: lead.discardedReason || 'Movido para Base Geral.' })
+    discarded += 1
+  }
+  await writeStore(store)
+  res.json({ discarded })
+})
+
+app.post('/api/admin/site-health', requireAuth, async (req, res, next) => {
+  try {
+    if (!isAdmin(req.user)) return res.status(403).json({ error: 'Acesso restrito a administradores.' })
+    const store = await readStore()
+    const cityFilter = req.body.city ? String(req.body.city).toLowerCase().trim() : null
+    const leadsWithSites = store.leadPool
+      .filter((l) => l.site && String(l.site).trim())
+      .filter((l) => !cityFilter || (l.city && String(l.city).toLowerCase().includes(cityFilter)))
+      .slice(0, 500)
+
+    async function checkOne(lead) {
+      let url = String(lead.site).trim()
+      if (!url.startsWith('http')) url = 'https://' + url
+      const start = Date.now()
+      let status = null
+      let errorMsg = null
+      let responseMs = null
+      try {
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 8000)
+        let resp = await fetch(url, {
+          signal: controller.signal,
+          method: 'HEAD',
+          redirect: 'follow',
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SiteHealthChecker/1.0)' },
+        })
+        // Some servers reject HEAD — fallback to GET
+        if (resp.status === 405) {
+          resp = await fetch(url, { signal: controller.signal, method: 'GET', redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0' } })
+        }
+        clearTimeout(timer)
+        responseMs = Date.now() - start
+        status = resp.status
+      } catch (err) {
+        responseMs = Date.now() - start
+        errorMsg = err.name === 'AbortError' ? 'timeout' : (err.message || 'error')
+      }
+      return { id: lead.id, name: lead.name, url, status, responseMs, error: errorMsg }
+    }
+
+    // Process in parallel batches of 15
+    const CONCURRENCY = 15
+    const results = []
+    for (let i = 0; i < leadsWithSites.length; i += CONCURRENCY) {
+      const batch = leadsWithSites.slice(i, i + CONCURRENCY)
+      const batchResults = await Promise.all(batch.map(checkOne))
+      results.push(...batchResults)
+    }
+
+    res.json({ results, total: leadsWithSites.length })
+  } catch (err) {
+    next(err)
+  }
+})
+
 app.use(express.static(distDir))
 app.get(/.*/, (_req, res) => {
   res.sendFile(path.join(distDir, 'index.html'))
