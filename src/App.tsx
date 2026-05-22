@@ -2327,7 +2327,7 @@ function AdminView({ dashboard, runs }: { dashboard: Dashboard | null; assignmen
   }
 
   return (
-    <>
+    <div className="admin-shell">
       <div className="admin-tabs">
         <button type="button" className={adminTab === 'users' ? 'active' : ''} onClick={() => setAdminTab('users')}>Gestão</button>
         <button type="button" className={adminTab === 'projects' ? 'active' : ''} onClick={() => setAdminTab('projects')}>Projetos</button>
@@ -2340,7 +2340,7 @@ function AdminView({ dashboard, runs }: { dashboard: Dashboard | null; assignmen
       {adminTab === 'sites' && <SiteHealthView />}
 
       {adminTab === 'users' && (
-    <section className="content-grid">
+    <section className="content-grid" style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
 
       {/* ── Criar conta ── */}
       <article className="panel">
@@ -2497,7 +2497,7 @@ function AdminView({ dashboard, runs }: { dashboard: Dashboard | null; assignmen
 
     </section>
       )}
-    </>
+    </div>
   )
 }
 

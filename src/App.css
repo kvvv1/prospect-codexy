@@ -1683,11 +1683,20 @@ button:disabled {
 .ws-dot.unknown { background: #3a4f6a; }
 
 /* ── Admin UI ── */
+.admin-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .admin-tabs {
   display: flex;
   gap: 8px;
   margin-bottom: 12px;
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .admin-tabs button {
@@ -3982,7 +3991,8 @@ button:disabled {
   flex-direction: column;
   gap: 16px;
   padding: 20px;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
