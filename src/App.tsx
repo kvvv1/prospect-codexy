@@ -159,6 +159,20 @@ type SiteCheckResult = {
   error: string | null
 }
 
+type Project = {
+  id: string
+  name: string
+  client: string
+  value: number | null
+  tool: string
+  assignee: string
+  stage: string
+  notes: string
+  dueDate: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 type InboxMessage = {
   id: string
   leadId: string | null
@@ -1983,8 +1997,201 @@ function WhatsAppView({ whatsapp, qrCode, onConnect, onRefresh }: { whatsapp: Wh
   )
 }
 
+const PROJECT_STAGES = ['Negociação', 'Em andamento', 'Revisão', 'Entregue', 'Cancelado']
+
+const PROJECT_STAGE_COLORS: Record<string, string> = {
+  'Negociação': '#f59e0b',
+  'Em andamento': '#4a8fff',
+  'Revisão': '#a78bfa',
+  'Entregue': '#22c55e',
+  'Cancelado': '#6b7280',
+}
+
+function ProjectsBoardView() {
+  const [projects, setProjects] = useState<Project[]>([])
+  const [loading, setLoading] = useState(true)
+  const [modal, setModal] = useState<{ mode: 'create' | 'edit'; project?: Project } | null>(null)
+  const [form, setForm] = useState({ name: '', client: '', value: '', tool: '', assignee: '', stage: 'Negociação', notes: '', dueDate: '' })
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+
+  async function fetchProjects() {
+    try {
+      const data = await api<{ projects: Project[] }>('/api/admin/projects')
+      setProjects(data.projects)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { fetchProjects() }, [])
+
+  function openCreate() {
+    setForm({ name: '', client: '', value: '', tool: '', assignee: '', stage: 'Negociação', notes: '', dueDate: '' })
+    setErr('')
+    setModal({ mode: 'create' })
+  }
+
+  function openEdit(p: Project) {
+    setForm({
+      name: p.name,
+      client: p.client,
+      value: p.value != null ? String(p.value) : '',
+      tool: p.tool,
+      assignee: p.assignee,
+      stage: p.stage,
+      notes: p.notes,
+      dueDate: p.dueDate || '',
+    })
+    setErr('')
+    setModal({ mode: 'edit', project: p })
+  }
+
+  async function saveProject(e: React.FormEvent) {
+    e.preventDefault()
+    setSaving(true)
+    setErr('')
+    try {
+      const body = { ...form, value: form.value !== '' ? Number(form.value) : null }
+      if (modal?.mode === 'edit' && modal.project) {
+        const data = await api<{ project: Project }>(`/api/admin/projects/${modal.project.id}`, { method: 'PUT', body: JSON.stringify(body) })
+        setProjects((prev) => prev.map((p) => p.id === data.project.id ? data.project : p))
+      } else {
+        const data = await api<{ project: Project }>('/api/admin/projects', { method: 'POST', body: JSON.stringify(body) })
+        setProjects((prev) => [...prev, data.project])
+      }
+      setModal(null)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Erro ao salvar.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function moveStage(project: Project, stage: string) {
+    try {
+      const data = await api<{ project: Project }>(`/api/admin/projects/${project.id}`, { method: 'PUT', body: JSON.stringify({ stage }) })
+      setProjects((prev) => prev.map((p) => p.id === data.project.id ? data.project : p))
+    } catch { /* ignore */ }
+  }
+
+  async function deleteProject(p: Project) {
+    if (!confirm(`Remover projeto "${p.name}"?`)) return
+    try {
+      await api(`/api/admin/projects/${p.id}`, { method: 'DELETE' })
+      setProjects((prev) => prev.filter((x) => x.id !== p.id))
+    } catch { /* ignore */ }
+  }
+
+  const grouped = PROJECT_STAGES.map((stage) => ({ stage, items: projects.filter((p) => p.stage === stage) }))
+
+  return (
+    <div className="proj-board-wrap">
+      <div className="proj-board-header">
+        <span className="proj-board-title">{projects.length} projeto{projects.length !== 1 ? 's' : ''}</span>
+        <button type="button" className="btn-primary small" onClick={openCreate}>+ Novo projeto</button>
+      </div>
+      {loading && <div className="proj-loading">Carregando…</div>}
+      {!loading && (
+        <div className="proj-board">
+          {grouped.map(({ stage, items }) => (
+            <div key={stage} className="proj-col">
+              <div className="proj-col-header" style={{ borderColor: PROJECT_STAGE_COLORS[stage] }}>
+                <span className="proj-col-title" style={{ color: PROJECT_STAGE_COLORS[stage] }}>{stage}</span>
+                <span className="proj-col-count">{items.length}</span>
+              </div>
+              <div className="proj-col-cards">
+                {items.map((p) => (
+                  <div key={p.id} className="proj-card" onClick={() => openEdit(p)}>
+                    <div className="proj-card-name">{p.name}</div>
+                    {p.client && <div className="proj-card-client">👤 {p.client}</div>}
+                    <div className="proj-card-meta">
+                      {p.value != null && (
+                        <span className="proj-card-value">R$ {p.value.toLocaleString('pt-BR')}</span>
+                      )}
+                      {p.tool && <span className="proj-card-tool">{p.tool}</span>}
+                    </div>
+                    {p.assignee && <div className="proj-card-assignee">{p.assignee}</div>}
+                    {p.dueDate && (
+                      <div className={`proj-card-due${new Date(p.dueDate) < new Date() && stage !== 'Entregue' && stage !== 'Cancelado' ? ' overdue' : ''}`}>
+                        📅 {new Date(p.dueDate).toLocaleDateString('pt-BR')}
+                      </div>
+                    )}
+                    <div className="proj-card-actions" onClick={(e) => e.stopPropagation()}>
+                      <select
+                        value={p.stage}
+                        className="proj-stage-select"
+                        onChange={(e) => moveStage(p, e.target.value)}
+                        title="Mover para etapa"
+                      >
+                        {PROJECT_STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                      <button type="button" className="proj-delete-btn" onClick={() => deleteProject(p)} title="Remover">✕</button>
+                    </div>
+                  </div>
+                ))}
+                {items.length === 0 && <div className="proj-col-empty">—</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {modal && (
+        <div className="proj-modal-backdrop" onClick={() => setModal(null)}>
+          <div className="proj-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="proj-modal-header">
+              <span>{modal.mode === 'create' ? 'Novo projeto' : 'Editar projeto'}</span>
+              <button type="button" className="proj-modal-close" onClick={() => setModal(null)}>✕</button>
+            </div>
+            <form className="proj-modal-form" onSubmit={saveProject}>
+              {err && <p className="form-error">{err}</p>}
+              <div className="proj-form-row">
+                <label>Nome do projeto *
+                  <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Ex: Site institucional" required />
+                </label>
+                <label>Cliente
+                  <input value={form.client} onChange={(e) => setForm((f) => ({ ...f, client: e.target.value }))} placeholder="Ex: Empresa ABC" />
+                </label>
+              </div>
+              <div className="proj-form-row">
+                <label>Valor (R$)
+                  <input type="number" value={form.value} onChange={(e) => setForm((f) => ({ ...f, value: e.target.value }))} placeholder="Ex: 3500" min="0" step="0.01" />
+                </label>
+                <label>Ferramenta / Stack
+                  <input value={form.tool} onChange={(e) => setForm((f) => ({ ...f, tool: e.target.value }))} placeholder="Ex: React, WhatsApp Bot" />
+                </label>
+              </div>
+              <div className="proj-form-row">
+                <label>Responsável
+                  <input value={form.assignee} onChange={(e) => setForm((f) => ({ ...f, assignee: e.target.value }))} placeholder="Ex: Lucas" />
+                </label>
+                <label>Prazo
+                  <input type="date" value={form.dueDate} onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))} />
+                </label>
+              </div>
+              <label>Etapa
+                <select value={form.stage} onChange={(e) => setForm((f) => ({ ...f, stage: e.target.value }))}>
+                  {PROJECT_STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </label>
+              <label>Notas
+                <textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Observações sobre o projeto…" rows={3} />
+              </label>
+              <div className="proj-modal-footer">
+                <button type="button" className="btn-ghost" onClick={() => setModal(null)}>Cancelar</button>
+                <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Salvando…' : 'Salvar'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function AdminView({ dashboard, runs }: { dashboard: Dashboard | null; assignments?: Assignment[]; runs: SearchRun[] }) {
-  const [adminTab, setAdminTab] = useState<'users' | 'trojan' | 'sites'>('users')
+  const [adminTab, setAdminTab] = useState<'users' | 'trojan' | 'sites' | 'projects'>('users')
   const [users, setUsers] = useState<AdminUser[]>([])
   const [form, setForm] = useState({ name: '', username: '', password: '', role: 'Comercial' })
   const [editing, setEditing] = useState<AdminUser | null>(null)
@@ -2119,10 +2326,12 @@ function AdminView({ dashboard, runs }: { dashboard: Dashboard | null; assignmen
     <>
       <div className="admin-tabs">
         <button type="button" className={adminTab === 'users' ? 'active' : ''} onClick={() => setAdminTab('users')}>Gestão</button>
+        <button type="button" className={adminTab === 'projects' ? 'active' : ''} onClick={() => setAdminTab('projects')}>Projetos</button>
         <button type="button" className={adminTab === 'trojan' ? 'active' : ''} onClick={() => setAdminTab('trojan')}>Cavalo de Troia</button>
         <button type="button" className={adminTab === 'sites' ? 'active' : ''} onClick={() => setAdminTab('sites')}>Sites Quebrados</button>
       </div>
 
+      {adminTab === 'projects' && <ProjectsBoardView />}
       {adminTab === 'trojan' && <TrojanView />}
       {adminTab === 'sites' && <SiteHealthView />}
 

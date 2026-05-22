@@ -922,6 +922,69 @@ app.post('/api/admin/site-health', requireAuth, async (req, res, next) => {
   }
 })
 
+// ── Projects board ────────────────────────────────────────────────────────────
+
+app.get('/api/admin/projects', requireAuth, async (req, res) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Acesso restrito a administradores.' })
+  const store = await readStore()
+  res.json({ projects: store.projects || [] })
+})
+
+app.post('/api/admin/projects', requireAuth, async (req, res) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Acesso restrito a administradores.' })
+  const { name, client, value, tool, assignee, stage, notes, dueDate } = req.body
+  if (!name?.trim()) return res.status(400).json({ error: 'Nome obrigatório.' })
+  const store = await readStore()
+  const project = {
+    id: createId('proj'),
+    name: String(name).trim(),
+    client: String(client || '').trim(),
+    value: value != null && value !== '' ? Number(value) : null,
+    tool: String(tool || '').trim(),
+    assignee: String(assignee || '').trim(),
+    stage: stage || 'Negociação',
+    notes: String(notes || '').trim(),
+    dueDate: dueDate || null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }
+  store.projects = [...(store.projects || []), project]
+  await writeStore(store)
+  res.json({ project })
+})
+
+app.put('/api/admin/projects/:id', requireAuth, async (req, res) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Acesso restrito a administradores.' })
+  const store = await readStore()
+  const idx = (store.projects || []).findIndex((p) => p.id === req.params.id)
+  if (idx === -1) return res.status(404).json({ error: 'Projeto não encontrado.' })
+  const { name, client, value, tool, assignee, stage, notes, dueDate } = req.body
+  store.projects[idx] = {
+    ...store.projects[idx],
+    ...(name != null && { name: String(name).trim() }),
+    ...(client != null && { client: String(client).trim() }),
+    ...(value !== undefined && { value: value !== '' && value != null ? Number(value) : null }),
+    ...(tool != null && { tool: String(tool).trim() }),
+    ...(assignee != null && { assignee: String(assignee).trim() }),
+    ...(stage != null && { stage }),
+    ...(notes != null && { notes: String(notes).trim() }),
+    ...(dueDate !== undefined && { dueDate: dueDate || null }),
+    updatedAt: new Date().toISOString(),
+  }
+  await writeStore(store)
+  res.json({ project: store.projects[idx] })
+})
+
+app.delete('/api/admin/projects/:id', requireAuth, async (req, res) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Acesso restrito a administradores.' })
+  const store = await readStore()
+  const before = (store.projects || []).length
+  store.projects = (store.projects || []).filter((p) => p.id !== req.params.id)
+  if (store.projects.length === before) return res.status(404).json({ error: 'Projeto não encontrado.' })
+  await writeStore(store)
+  res.json({ ok: true })
+})
+
 app.use(express.static(distDir))
 app.get(/.*/, (_req, res) => {
   res.sendFile(path.join(distDir, 'index.html'))

@@ -27,6 +27,7 @@ const initialStore = {
   notifications: [],
   activityLog: [],
   searchCache: {},
+  projects: [],
 }
 
 export async function readStore() {
@@ -126,6 +127,7 @@ function normalizeStore(store = {}) {
     notifications: Array.isArray(migrated.notifications) ? migrated.notifications : [],
     activityLog: Array.isArray(migrated.activityLog) ? migrated.activityLog : [],
     searchCache: migrated.searchCache && typeof migrated.searchCache === 'object' ? migrated.searchCache : {},
+    projects: Array.isArray(migrated.projects) ? migrated.projects : [],
   }
 }
 
