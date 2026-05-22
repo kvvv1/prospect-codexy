@@ -3716,6 +3716,23 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.approval-select-all-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #8fafc8;
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #1e3a5f;
+  background: #0b1120;
+  transition: border-color 0.15s, background 0.15s;
+}
+.approval-select-all-label:hover { border-color: #4a8fff; background: #0e1828; color: #d0dff0; }
+.approval-select-all-label input[type="checkbox"] { accent-color: #4a8fff; cursor: pointer; }
+
 .approval-count {
   font-size: 13px;
   color: #8fafc8;

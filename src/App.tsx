@@ -1430,6 +1430,17 @@ function ApprovalView({ user, onRefreshCore, onCountChange }: {
     <div className="approval-view">
       <div className="approval-sidebar">
         <div className="approval-toolbar">
+          {filtered.length > 0 && (
+            <label className="approval-select-all-label">
+              <input
+                type="checkbox"
+                checked={checkedIds.size > 0 && checkedIds.size === filtered.length}
+                ref={(el) => { if (el) el.indeterminate = checkedIds.size > 0 && checkedIds.size < filtered.length }}
+                onChange={() => setCheckedIds(checkedIds.size === filtered.length ? new Set() : new Set(filtered.map((l) => l.id)))}
+              />
+              <span>{checkedIds.size === filtered.length && filtered.length > 0 ? 'Desmarcar todos' : 'Selecionar todos'}</span>
+            </label>
+          )}
           <span className="approval-count">{filtered.length} lead{filtered.length !== 1 ? 's' : ''} aguardando</span>
           {user.isAdmin && ownerNames.length > 0 && (
             <select value={filterOwner} onChange={(e) => setFilterOwner(e.target.value)} className="kb-select">
@@ -1440,14 +1451,6 @@ function ApprovalView({ user, onRefreshCore, onCountChange }: {
         </div>
         {checkedIds.size > 0 && (
           <div className="bulk-bar">
-            <button
-              type="button"
-              className={`bulk-select-all${checkedIds.size === filtered.length ? ' active' : ''}`}
-              onClick={() => setCheckedIds(checkedIds.size === filtered.length ? new Set() : new Set(filtered.map((l) => l.id)))}
-            >
-              <input type="checkbox" readOnly checked={checkedIds.size === filtered.length} style={{ pointerEvents: 'none' }} />
-              {checkedIds.size === filtered.length ? 'Desmarcar todos' : 'Selecionar todos'}
-            </button>
             <span className="bulk-count">{checkedIds.size} selecionado{checkedIds.size !== 1 ? 's' : ''}</span>
             <div className="bulk-actions">
               <button type="button" className="bulk-btn" style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }} disabled={busy} onClick={bulkApprove}>Aprovar</button>
