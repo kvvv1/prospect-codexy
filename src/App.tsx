@@ -217,7 +217,7 @@ function App() {
   const [status, setStatus] = useState('Pronto.')
   const [isBusy, setIsBusy] = useState(false)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
-  const [view, setView] = useState<'kanban' | 'approval'>('kanban')
+  const [view, setView] = useState<'kanban' | 'approval' | 'admin'>('kanban')
   const [approvalCount, setApprovalCount] = useState(0)
   const [meetingModal, setMeetingModal] = useState<{ assignment: Assignment } | null>(null)
 
@@ -345,6 +345,9 @@ function App() {
           <button type="button" className={`page-nav-btn${view === 'approval' ? ' active' : ''}`} onClick={() => setView('approval')}>
             Aprovação{approvalCount > 0 ? <span className="page-nav-badge">{approvalCount}</span> : null}
           </button>
+          {user.isAdmin && (
+            <button type="button" className={`page-nav-btn${view === 'admin' ? ' active' : ''}`} onClick={() => setView('admin')}>Admin</button>
+          )}
         </nav>
         <div className="page-center">
           <span className="page-status">{status}</span>
@@ -359,6 +362,7 @@ function App() {
       <div className="page-body">
         {view === 'kanban' && <KanbanView assignments={assignments} followUps={followUps} onOpenCrm={openCrm} onStage={updateStage} onRefresh={refreshCore} onRunAction={runAction} user={user} onDelete={deleteAssignment} />}
         {view === 'approval' && <ApprovalView user={user} onRefreshCore={refreshCore} onCountChange={setApprovalCount} />}
+        {view === 'admin' && <AdminView dashboard={null} runs={[]} />}
       </div>
 
       {crmOpen && (
