@@ -8,7 +8,8 @@
 
 /* ── Single-page shell ── */
 .page-shell {
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   background: #0a0d14;
@@ -4044,7 +4045,7 @@ button:disabled {
   overflow-x: auto;
   overflow-y: hidden;
   flex: 1;
-  min-height: 0;
+  min-height: 300px;
   padding-bottom: 8px;
 }
 
