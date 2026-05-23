@@ -217,7 +217,8 @@ function App() {
   const [status, setStatus] = useState('Pronto.')
   const [isBusy, setIsBusy] = useState(false)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
-  const [view, setView] = useState<'kanban' | 'approval' | 'admin'>('kanban')
+  const [view, setView] = useState<'kanban' | 'approval' | 'whatsapp' | 'admin'>('kanban')
+  const [userQrCode, setUserQrCode] = useState<string>('')
   const [approvalCount, setApprovalCount] = useState(0)
   const [meetingModal, setMeetingModal] = useState<{ assignment: Assignment } | null>(null)
 
@@ -257,6 +258,22 @@ function App() {
   async function logout() {
     await api('/api/auth/logout', { method: 'POST' })
     setUser(null)
+  }
+
+  async function refreshWhatsapp() {
+    const d = await api<{ whatsapp: WhatsAppStatus }>('/api/users/me/whatsapp')
+    setWhatsapp(d.whatsapp)
+  }
+
+  async function connectWhatsApp() {
+    try {
+      const d = await api<{ whatsapp: WhatsAppStatus; qrcode: { base64?: string | null } }>('/api/users/me/whatsapp/connect', { method: 'POST' })
+      setWhatsapp(d.whatsapp)
+      const b64 = d.qrcode?.base64
+      setUserQrCode(b64 ? `data:image/png;base64,${b64}` : '')
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : 'Erro ao conectar WhatsApp.')
+    }
   }
 
   async function updateStage(assignment: Assignment, stage: string, extra?: { nextAction?: string; note?: string }) {
@@ -345,6 +362,10 @@ function App() {
           <button type="button" className={`page-nav-btn${view === 'approval' ? ' active' : ''}`} onClick={() => setView('approval')}>
             Aprovação{approvalCount > 0 ? <span className="page-nav-badge">{approvalCount}</span> : null}
           </button>
+          <button type="button" className={`page-nav-btn${view === 'whatsapp' ? ' active' : ''}`} onClick={() => setView('whatsapp')}>
+            <span className={`ws-dot ${whatsapp?.connectionStatus || 'unknown'}`} style={{ marginRight: 4 }} />
+            WhatsApp
+          </button>
           {user.isAdmin && (
             <button type="button" className={`page-nav-btn${view === 'admin' ? ' active' : ''}`} onClick={() => setView('admin')}>Admin</button>
           )}
@@ -362,6 +383,7 @@ function App() {
       <div className="page-body">
         {view === 'kanban' && <KanbanView assignments={assignments} followUps={followUps} onOpenCrm={openCrm} onStage={updateStage} onRefresh={refreshCore} onRunAction={runAction} user={user} onDelete={deleteAssignment} />}
         {view === 'approval' && <ApprovalView user={user} onRefreshCore={refreshCore} onCountChange={setApprovalCount} />}
+        {view === 'whatsapp' && <WhatsAppView whatsapp={whatsapp} qrCode={userQrCode} onConnect={connectWhatsApp} onRefresh={refreshWhatsapp} />}
         {view === 'admin' && <AdminView dashboard={null} runs={[]} />}
       </div>
 
