@@ -19,6 +19,9 @@ import {
   writeStore,
 } from './store.js'
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const randomDelay = (min, max) => sleep(min + Math.random() * (max - min))
+
 const app = express()
 const port = Number(process.env.PORT || 3004)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -370,6 +373,7 @@ app.post('/api/follow-ups/:id/send', async (req, res, next) => {
       return res.status(409).json({ error: 'Conecte o WhatsApp comercial antes de enviar.' })
     }
 
+    await randomDelay(1000, 3000)
     const result = await sendWhatsAppText({ number: targetNumber, text, instanceName: user.evolutionInstanceName })
 
     store.messages.push({
@@ -506,6 +510,7 @@ app.post('/api/messages/send', async (req, res, next) => {
       })
     }
 
+    await randomDelay(1000, 3000)
     const result = await sendWhatsAppText({ number: targetNumber, text, instanceName: user.evolutionInstanceName })
     store.messages.push({
       id: createId('msg'),
@@ -776,6 +781,7 @@ app.post('/api/admin/trojan/send', requireAuth, async (req, res, next) => {
 
     const results = []
     for (let index = 0; index < selectedLeads.length; index += 1) {
+      if (index > 0) await randomDelay(3000, 8000)
       const lead = selectedLeads[index]
       const variantIndex = index % variants.length
       const text = renderTrojanText(variants[variantIndex], lead)

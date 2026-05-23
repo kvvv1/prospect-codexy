@@ -1866,6 +1866,30 @@ button:disabled {
   margin-bottom: 4px;
 }
 
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.send-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin-right: 8px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.send-delay-hint {
+  font-size: 0.78rem;
+  color: #fbbf24;
+  margin: 6px 0 0;
+  opacity: 0.85;
+}
+
 /* ── Instance panel ── */
 .instance-toolbar {
   display: flex;

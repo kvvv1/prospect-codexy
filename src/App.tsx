@@ -1900,9 +1900,10 @@ function CrmView({
                   disabled={isSending || !approach.trim() || !selected.lead.phone}
                   title={!waConnected ? 'Conecte o WhatsApp na aba WhatsApp primeiro' : ''}
                 >
-                  {isSending ? 'Enviando…' : 'Enviar via WhatsApp'}
+                  {isSending ? <><span className="send-spinner" />Enviando…</> : 'Enviar via WhatsApp'}
                 </button>
               </div>
+              {isSending && <p className="send-delay-hint">Aguardando delay de segurança para proteger sua conta…</p>}
               {sendStatus && (
                 <p className={sendStatus.ok ? 'form-success' : 'form-error'}>{sendStatus.msg}</p>
               )}
@@ -2697,10 +2698,11 @@ function TrojanView() {
   async function sendTrojan() {
     if (!selectedLeads.length) return setStatus('Selecione ao menos um lead.')
     if (messages.some((msg) => !msg.trim())) return setStatus('Preencha as 3 formas de mensagem.')
-    if (!confirm(`Enviar Cavalo de Troia para ${selectedLeads.length} lead${selectedLeads.length !== 1 ? 's' : ''}?`)) return
+    const estimatedMin = Math.ceil((selectedLeads.length * 5.5) / 60)
+    if (!confirm(`Enviar Cavalo de Troia para ${selectedLeads.length} lead${selectedLeads.length !== 1 ? 's' : ''}?\n\nDelay de segurança entre mensagens: ~3-8s\nTempo estimado: ~${estimatedMin} min`)) return
 
     setIsSending(true)
-    setStatus('Enviando mensagens...')
+    setStatus(`Enviando com delay de segurança… (estimado ~${estimatedMin} min, não feche a janela)`)
     try {
       const data = await api<{ campaign: { sent: number; failed: number } }>('/api/admin/trojan/send', {
         method: 'POST',
@@ -2797,7 +2799,7 @@ function TrojanView() {
         </div>
         <div className="button-row">
           <button className="primary-button" type="button" onClick={sendTrojan} disabled={isSending || selectedLeads.length === 0}>
-            {isSending ? 'Enviando...' : `Enviar para ${selectedLeads.length}`}
+            {isSending ? <><span className="send-spinner" />Enviando com delay…</> : `Enviar para ${selectedLeads.length}`}
           </button>
         </div>
       </article>
@@ -3133,10 +3135,10 @@ function CmdDetail({
           <button type="button" className="btn-ghost small" onClick={save} disabled={isSaving}>{isSaving ? 'Salvando…' : 'Salvar'}</button>
           <button type="button" className="btn-ghost small" onClick={generate} disabled={isGenerating}>{isGenerating ? 'Gerando…' : 'Gerar IA'}</button>
           <button type="button" className="btn-primary small" onClick={send} disabled={isSending || !waConnected || !approach.trim() || !assignment.lead.phone} title={!waConnected ? 'WhatsApp não conectado' : !assignment.lead.phone ? 'Sem telefone' : ''}>
-            <span className={`ws-dot ${waConnected ? 'open' : 'close'}`} style={{ marginRight: 5 }} />
-            {isSending ? 'Enviando…' : 'Enviar WA'}
+            {isSending ? <><span className="send-spinner" />Enviando…</> : <><span className={`ws-dot ${waConnected ? 'open' : 'close'}`} style={{ marginRight: 5 }} />Enviar WA</>}
           </button>
         </div>
+        {isSending && <p className="send-delay-hint">Aguardando delay de segurança…</p>}
         {sendStatus && <p className={sendStatus.ok ? 'form-success' : 'form-error'} style={{ marginTop: 6 }}>{sendStatus.msg}</p>}
       </div>
       {followUps.length > 0 && (
