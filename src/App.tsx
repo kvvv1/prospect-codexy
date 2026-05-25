@@ -234,9 +234,14 @@ function App() {
   }, [user?.isAdmin])
 
   const checkSession = useCallback(async () => {
-    const data = await api<{ user: SessionUser | null }>('/api/auth/session')
-    setUser(data.user)
-    setIsCheckingSession(false)
+    try {
+      const data = await api<{ user: SessionUser | null }>('/api/auth/session')
+      setUser(data.user)
+    } catch {
+      setUser(null)
+    } finally {
+      setIsCheckingSession(false)
+    }
   }, [])
 
   useEffect(() => {
@@ -263,14 +268,41 @@ function App() {
   async function refreshWhatsapp() {
     const d = await api<{ whatsapp: WhatsAppStatus }>('/api/users/me/whatsapp')
     setWhatsapp(d.whatsapp)
+    if (d.whatsapp?.connectionStatus === 'open') setUserQrCode('')
   }
+
+  useEffect(() => {
+    if (!userQrCode) return
+    const poll = setInterval(async () => {
+      try {
+        const d = await api<{ whatsapp: WhatsAppStatus }>('/api/users/me/whatsapp')
+        setWhatsapp(d.whatsapp)
+        if (d.whatsapp?.connectionStatus === 'open') {
+          setUserQrCode('')
+          setStatus('WhatsApp conectado com sucesso!')
+        }
+      } catch {
+        // ignore poll errors
+      }
+    }, 5000)
+    return () => clearInterval(poll)
+  }, [userQrCode])
 
   async function connectWhatsApp() {
     try {
       const d = await api<{ whatsapp: WhatsAppStatus; qrcode: { base64?: string | null } }>('/api/users/me/whatsapp/connect', { method: 'POST' })
       setWhatsapp(d.whatsapp)
       const b64 = d.qrcode?.base64
-      setUserQrCode(b64 ? `data:image/png;base64,${b64}` : '')
+      if (b64) {
+        setUserQrCode(b64.startsWith('data:') ? b64 : `data:image/png;base64,${b64}`)
+      } else {
+        setUserQrCode('')
+        if (d.whatsapp?.connectionStatus === 'open') {
+          setStatus('WhatsApp já está conectado.')
+        } else {
+          setStatus('QR Code não disponível. Tente novamente.')
+        }
+      }
     } catch (err) {
       setStatus(err instanceof Error ? err.message : 'Erro ao conectar WhatsApp.')
     }
@@ -2008,7 +2040,19 @@ function FollowUpView({ followUps, onDone }: { followUps: FollowUp[]; onDone: (f
   )
 }
 
-function WhatsAppView({ whatsapp, qrCode, onConnect, onRefresh }: { whatsapp: WhatsAppStatus | null; qrCode: string; onConnect: () => void; onRefresh: () => void }) {
+function WhatsAppView({ whatsapp, qrCode, onConnect, onRefresh }: { whatsapp: WhatsAppStatus | null; qrCode: string; onConnect: () => Promise<void>; onRefresh: () => void }) {
+  const [isConnecting, setIsConnecting] = useState(false)
+  const isConnected = whatsapp?.connectionStatus === 'open'
+
+  async function handleConnect() {
+    setIsConnecting(true)
+    try {
+      await onConnect()
+    } finally {
+      setIsConnecting(false)
+    }
+  }
+
   return (
     <section className="panel">
       <PanelTitle title="WhatsApp comercial" description="Cada vendedor conecta a própria instância para enviar abordagens." />
@@ -2016,10 +2060,22 @@ function WhatsAppView({ whatsapp, qrCode, onConnect, onRefresh }: { whatsapp: Wh
         <div><span>Status</span><strong>{whatsapp?.status || 'Não conectado'}</strong>{whatsapp?.profileName && <small>{whatsapp.profileName}</small>}</div>
         <div className="button-row">
           <button className="ghost-button" type="button" onClick={onRefresh}>Atualizar</button>
-          <button className="primary-button" type="button" onClick={onConnect}>Conectar</button>
+          {!isConnected && (
+            <button className="primary-button" type="button" onClick={handleConnect} disabled={isConnecting}>
+              {isConnecting ? <><span className="send-spinner" /> Aguardando QR…</> : 'Conectar'}
+            </button>
+          )}
         </div>
       </div>
-      {qrCode && <div className="qr-box"><div><strong>Escaneie o QR Code</strong><span>WhatsApp &gt; Aparelhos conectados &gt; Conectar aparelho</span></div><img src={qrCode} alt="QR Code do WhatsApp" /></div>}
+      {qrCode && (
+        <div className="qr-box">
+          <div>
+            <strong>Escaneie o QR Code</strong>
+            <span>WhatsApp &gt; Aparelhos conectados &gt; Conectar aparelho</span>
+          </div>
+          <img src={qrCode} alt="QR Code do WhatsApp" />
+        </div>
+      )}
     </section>
   )
 }
@@ -2045,7 +2101,9 @@ function ProjectsBoardView() {
   async function fetchProjects() {
     try {
       const data = await api<{ projects: Project[] }>('/api/admin/projects')
-      setProjects(data.projects)
+      setProjects(Array.isArray(data.projects) ? data.projects : [])
+    } catch {
+      // API missing or returned non-JSON — stay with empty list
     } finally {
       setLoading(false)
     }
