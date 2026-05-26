@@ -28,6 +28,13 @@ const initialStore = {
   activityLog: [],
   searchCache: {},
   projects: [],
+  siteHealthResults: {},
+  wolfCron: {
+    enabled: false,
+    dailyLimit: 50,
+    lastRunAt: null,
+    lastRunStats: null,
+  },
 }
 
 export async function readStore() {
@@ -36,15 +43,22 @@ export async function readStore() {
     const raw = await fs.readFile(storePath, 'utf8')
     return normalizeStore(JSON.parse(raw.replace(/\0/g, '')))
   } catch (err) {
-    console.error('[store] readStore failed, NOT overwriting file:', err.message)
-    return structuredClone(initialStore)
+    if (err.code === 'ENOENT') return structuredClone(initialStore)
+    console.error('[store] readStore failed, refusing empty fallback:', err.message)
+    throw new Error('Falha ao ler os dados persistidos. Nenhuma alteracao foi salva.')
   }
 }
 
 export async function writeStore(store) {
   await fs.mkdir(dataDir, { recursive: true })
   const nextStore = normalizeStore(store)
-  await fs.writeFile(storePath, JSON.stringify(nextStore, null, 2))
+  const tempPath = `${storePath}.${process.pid}.${Date.now()}.tmp`
+  try {
+    await fs.writeFile(tempPath, JSON.stringify(nextStore, null, 2))
+    await fs.rename(tempPath, storePath)
+  } finally {
+    await fs.rm(tempPath, { force: true }).catch(() => null)
+  }
 }
 
 export function createId(prefix) {
@@ -128,6 +142,8 @@ function normalizeStore(store = {}) {
     activityLog: Array.isArray(migrated.activityLog) ? migrated.activityLog : [],
     searchCache: migrated.searchCache && typeof migrated.searchCache === 'object' ? migrated.searchCache : {},
     projects: Array.isArray(migrated.projects) ? migrated.projects : [],
+    siteHealthResults: migrated.siteHealthResults && typeof migrated.siteHealthResults === 'object' ? migrated.siteHealthResults : {},
+    wolfCron: migrated.wolfCron && typeof migrated.wolfCron === 'object' ? migrated.wolfCron : { enabled: false, dailyLimit: 50, lastRunAt: null, lastRunStats: null },
   }
 }
 

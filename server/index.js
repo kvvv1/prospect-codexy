@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import express from 'express'
+import cron from 'node-cron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { clearSessionCookie, createSessionCookie, getSession, requireAuth } from './auth.js'
@@ -879,12 +880,12 @@ app.post('/api/admin/site-health', requireAuth, async (req, res, next) => {
     const store = await readStore()
     const cityFilter = req.body.city ? String(req.body.city).toLowerCase().trim() : null
     const leadsWithSites = store.leadPool
-      .filter((l) => l.site && String(l.site).trim())
+      .filter((l) => (l.website || l.site) && String(l.website || l.site).trim())
       .filter((l) => !cityFilter || (l.city && String(l.city).toLowerCase().includes(cityFilter)))
       .slice(0, 500)
 
     async function checkOne(lead) {
-      let url = String(lead.site).trim()
+      let url = String(lead.website || lead.site).trim()
       if (!url.startsWith('http')) url = 'https://' + url
       const start = Date.now()
       let status = null
@@ -921,6 +922,18 @@ app.post('/api/admin/site-health', requireAuth, async (req, res, next) => {
       const batchResults = await Promise.all(batch.map(checkOne))
       results.push(...batchResults)
     }
+
+    // Save results to store for Lobo de Wall Street
+    for (const result of results) {
+      store.siteHealthResults[result.id] = {
+        status: result.status,
+        responseMs: result.responseMs,
+        error: result.error,
+        url: result.url,
+        checkedAt: new Date().toISOString(),
+      }
+    }
+    await writeStore(store)
 
     res.json({ results, total: leadsWithSites.length })
   } catch (err) {
@@ -991,6 +1004,234 @@ app.delete('/api/admin/projects/:id', requireAuth, async (req, res) => {
   res.json({ ok: true })
 })
 
+// ── Lobo de Wall Street ────────────────────────────────────────────────────────
+
+app.get('/api/admin/wolf', requireAuth, async (req, res) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Acesso restrito a administradores.' })
+  const store = await readStore()
+
+  const brokenLeads = store.leadPool
+    .filter((lead) => lead.website || lead.site)
+    .map((lead) => {
+      const health = store.siteHealthResults[lead.id]
+      if (!health) return null
+      const isBroken = health.error !== null || (health.status != null && health.status >= 400)
+      if (!isBroken) return null
+      return { ...leadListView(store, lead), siteHealth: health }
+    })
+    .filter(Boolean)
+    .sort((a, b) => (b.score || 0) - (a.score || 0))
+
+  const approvedLeads = store.assignments
+    .filter((a) => a.status === 'active')
+    .map((a) => assignmentView(store, a))
+    .filter((a) => a.lead?.phone)
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+
+  res.json({ brokenLeads, approvedLeads })
+})
+
+app.post('/api/admin/wolf/send', requireAuth, async (req, res, next) => {
+  try {
+    if (!isAdmin(req.user)) return res.status(403).json({ error: 'Acesso restrito a administradores.' })
+
+    const { leadId, text } = req.body
+    if (!leadId || !text?.trim()) return res.status(400).json({ error: 'leadId e text obrigatórios.' })
+
+    const store = await readStore()
+    const user = await getCurrentUser(req, store)
+
+    const lead = store.leadPool.find((item) => item.id === leadId)
+    if (!lead) return res.status(404).json({ error: 'Lead não encontrado.' })
+    if (!lead.phone) return res.status(400).json({ error: 'Lead não possui número de WhatsApp.' })
+
+    const adminInstance = store.users.find((u) => isAdmin(u))
+    const instanceName = adminInstance?.evolutionInstanceName || user.evolutionInstanceName
+
+    const wStatus = await getInstanceStatus(instanceName)
+    if (wStatus.connectionStatus !== 'open') {
+      return res.status(409).json({ error: 'Conecte o WhatsApp do administrador antes de enviar.' })
+    }
+
+    let assignment = activeAssignmentForLead(store, leadId)
+    if (!assignment) {
+      const result = claimLead(store, user, leadId, {})
+      if (result.error) return res.status(result.status).json({ error: result.error })
+      assignment = result.assignment
+    }
+
+    await randomDelay(1000, 3000)
+    const result = await sendWhatsAppText({ number: lead.phone, text: text.trim(), instanceName })
+
+    store.messages.push({
+      id: createId('msg'),
+      userId: user.id,
+      leadId,
+      assignmentId: assignment.id,
+      number: String(lead.phone).replace(/\D/g, ''),
+      text: text.trim(),
+      status: result.ok ? 'sent' : 'failed',
+      providerStatus: result.status || null,
+      source: 'wolf',
+      createdAt: new Date().toISOString(),
+    })
+
+    if (result.ok) {
+      assignment.stage = 'Mensagem enviada'
+      assignment.updatedAt = new Date().toISOString()
+      assignment.history.push({ at: assignment.updatedAt, type: 'sent', text: 'Mensagem enviada via Lobo de Wall Street.' })
+      lead.lastContactAt = new Date().toISOString()
+    }
+
+    addActivity(store, { type: 'wolf_sent', userId: user.id, leadId, text: 'Lobo de Wall Street: mensagem enviada.' })
+    await writeStore(store)
+
+    res.json({ ok: result.ok, assignment: assignmentView(store, assignment) })
+  } catch (error) {
+    next(error)
+  }
+})
+
+// ── Lobo de Wall Street — Automático ─────────────────────────────────────────
+
+const wolfTemplates = [
+  (lead) => `${lead.name.split(' ')[0]}, acabei de analisar a ${lead.name} em ${lead.city} e tô vendo uns 20 a 40 clientes por mês indo direto pra concorrência que aparece no Google — e você não aparece. Isso é faturamento real escorrendo pelo ralo todo dia. Coloco a ${lead.name} na frente em 48h ou não me paga nada. Me manda um SIM que eu te mando a proposta agora.`,
+  (lead) => `${lead.name.split(' ')[0]}, a ${lead.name} tá invisível online enquanto seus concorrentes em ${lead.city} faturam com os clientes que deveriam ser seus. Calculei: com presença digital certa, você recupera no mínimo R$3k a R$8k por mês que tá perdendo agora. Trabalho com garantia — se não entregar resultado em 30 dias, devolvo tudo. Me fala SIM.`,
+  (lead) => `${lead.name.split(' ')[0]}, fiz uma análise rápida: todo ${lead.category} em ${lead.city} que não aparece no Google perde em média 35 clientes por mês pra quem aparece. São pessoas que pesquisaram, encontraram o concorrente e foram embora sem nem saber que a ${lead.name} existe. Resolvo isso essa semana. Garantia total. Manda SIM que a gente começa hoje.`,
+  (lead) => `${lead.name.split(' ')[0]}, você tá trabalhando duro pra manter a ${lead.name} de pé enquanto tem gente em ${lead.city} captando clientes no automático pela internet — clientes que deveriam ser seus. Já dobrei o faturamento de vários ${lead.category} só com presença digital certa. Faço o mesmo pela ${lead.name} com garantia de resultado ou devolução. Me dá uma chance — manda SIM.`,
+  (lead) => `${lead.name.split(' ')[0]}, enquanto você lê isso, alguém em ${lead.city} pesquisou "${lead.category}" no Google e foi pro seu concorrente — porque a ${lead.name} não apareceu. Isso acontece todo dia. Posso mudar esse cenário em 48h com garantia: resultado em 30 dias ou devolvo o investimento inteiro. Não tem risco pra você. Me manda SIM e eu te mostro exatamente como.`,
+]
+
+function buildWolfTemplate(lead, index) {
+  const fn = wolfTemplates[index % wolfTemplates.length]
+  return fn(lead)
+}
+
+function getLeadsEligibleForWolf(store) {
+  const contactedLeadIds = new Set(store.messages.filter((m) => m.leadId).map((m) => m.leadId))
+
+  const brokenLeads = store.leadPool
+    .filter((l) => l.phone && !contactedLeadIds.has(l.id))
+    .filter((l) => store.siteHealthResults[l.id])
+    .filter((l) => {
+      const h = store.siteHealthResults[l.id]
+      return h.error !== null || (h.status != null && h.status >= 400)
+    })
+
+  const approvedLeadIds = new Set(
+    store.assignments.filter((a) => a.status === 'active').map((a) => a.leadId)
+  )
+  const approvedLeads = store.leadPool
+    .filter((l) => l.phone && !contactedLeadIds.has(l.id) && approvedLeadIds.has(l.id))
+
+  const combined = [...brokenLeads, ...approvedLeads]
+  const unique = combined.filter((l, i, arr) => arr.findIndex((x) => x.id === l.id) === i)
+
+  // Fisher-Yates shuffle
+  for (let i = unique.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[unique[i], unique[j]] = [unique[j], unique[i]]
+  }
+  return unique
+}
+
+async function runWolfCron() {
+  const store = await readStore()
+  if (!store.wolfCron?.enabled) return
+
+  const adminUser = store.users.find((u) => isAdmin(u))
+  if (!adminUser) return
+
+  const wStatus = await getInstanceStatus(adminUser.evolutionInstanceName).catch(() => null)
+  if (!wStatus || wStatus.connectionStatus !== 'open') {
+    console.log('[wolf-cron] WhatsApp admin desconectado — abortando.')
+    return
+  }
+
+  const eligible = getLeadsEligibleForWolf(store)
+  const limit = store.wolfCron.dailyLimit || 50
+  const targets = eligible.slice(0, limit)
+
+  let sent = 0
+  let failed = 0
+
+  for (let i = 0; i < targets.length; i++) {
+    if (i > 0) await randomDelay(3000, 8000)
+    const lead = targets[i]
+    const text = buildWolfTemplate(lead, i)
+    let result
+    try {
+      result = await sendWhatsAppText({ number: lead.phone, text, instanceName: adminUser.evolutionInstanceName })
+    } catch {
+      result = { ok: false }
+    }
+
+    store.messages.push({
+      id: createId('msg'),
+      userId: adminUser.id,
+      leadId: lead.id,
+      assignmentId: null,
+      number: String(lead.phone).replace(/\D/g, ''),
+      text,
+      status: result.ok ? 'sent' : 'failed',
+      providerStatus: null,
+      source: 'wolf-auto',
+      createdAt: new Date().toISOString(),
+    })
+
+    if (result.ok) {
+      sent++
+      lead.lastContactAt = new Date().toISOString()
+    } else {
+      failed++
+    }
+  }
+
+  const stats = { sent, failed, total: targets.length, ranAt: new Date().toISOString() }
+  store.wolfCron.lastRunAt = stats.ranAt
+  store.wolfCron.lastRunStats = stats
+
+  addNotification(store, {
+    userId: adminUser.id,
+    type: 'wolf_auto_done',
+    text: `Lobo Automático: ${sent} enviado${sent !== 1 ? 's' : ''}, ${failed} falha${failed !== 1 ? 's' : ''} — ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`,
+  })
+
+  await writeStore(store)
+  console.log(`[wolf-cron] Rodou: ${sent} enviados, ${failed} falhas.`)
+}
+
+app.get('/api/admin/wolf/cron', requireAuth, async (req, res) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Acesso restrito a administradores.' })
+  const store = await readStore()
+  res.json({ wolfCron: store.wolfCron })
+})
+
+app.post('/api/admin/wolf/cron', requireAuth, async (req, res) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Acesso restrito a administradores.' })
+  const store = await readStore()
+  if (typeof req.body.enabled === 'boolean') store.wolfCron.enabled = req.body.enabled
+  if (req.body.dailyLimit != null) store.wolfCron.dailyLimit = Math.min(150, Math.max(1, Number(req.body.dailyLimit)))
+  await writeStore(store)
+  res.json({ wolfCron: store.wolfCron })
+})
+
+app.post('/api/admin/wolf/cron/run-now', requireAuth, async (req, res, next) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Acesso restrito a administradores.' })
+  try {
+    await runWolfCron()
+    const store = await readStore()
+    res.json({ wolfCron: store.wolfCron })
+  } catch (error) {
+    next(error)
+  }
+})
+
+// Roda todo dia às 9h (horário do servidor)
+cron.schedule('0 9 * * *', () => {
+  runWolfCron().catch((err) => console.error('[wolf-cron] Erro:', err.message))
+})
+
 app.use(express.static(distDir))
 app.get(/.*/, (_req, res) => {
   res.sendFile(path.join(distDir, 'index.html'))
@@ -1001,8 +1242,9 @@ app.use((error, _req, res, _next) => {
   res.status(500).json({ error: error.message || 'Erro interno.' })
 })
 
-app.listen(port, '127.0.0.1', () => {
-  console.log(`Codexy Prospect API on http://127.0.0.1:${port}`)
+const host = process.env.HOST || '127.0.0.1'
+app.listen(port, host, () => {
+  console.log(`Codexy Prospect API on http://${host}:${port}`)
 })
 
 async function getCurrentUser(req, store = null) {

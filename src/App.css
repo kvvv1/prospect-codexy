@@ -1617,6 +1617,17 @@ button:disabled {
   background: #ffffff;
 }
 
+.qr-countdown {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.qr-countdown.urgent {
+  color: #f59e0b;
+  font-weight: 600;
+}
+
 @media (max-width: 1180px) {
   .app-shell,
   .login-screen,
@@ -1989,6 +2000,7 @@ button:disabled {
   flex-direction: column;
   gap: 12px;
   flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -2098,6 +2110,7 @@ button:disabled {
   gap: 10px;
   overflow-x: auto;
   flex: 1;
+  min-height: 0;
   align-items: stretch;
   padding-bottom: 6px;
 }
@@ -2232,6 +2245,7 @@ button:disabled {
 .kb2-card {
   position: relative;
   display: flex;
+  flex-shrink: 0;
   border-radius: 8px;
   border: 1px solid #111d2e;
   background: #0b1120;
@@ -4263,6 +4277,262 @@ button:disabled {
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
+
+/* ── Lobo de Wall Street ─────────────────────────────────────────────────── */
+
+.admin-tab-wolf {
+  background: linear-gradient(135deg, #7c3aed22, #dc262622) !important;
+  border-color: #7c3aed44 !important;
+}
+.admin-tab-wolf.active {
+  background: linear-gradient(135deg, #7c3aed44, #dc262644) !important;
+  border-color: #7c3aed !important;
+  color: #eef2f7 !important;
+}
+
+.wolf-view {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  height: 100%;
+  overflow: hidden;
+}
+
+.wolf-sidebar {
+  border-right: 1px solid #1a2535;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.wolf-tabs {
+  display: flex;
+  border-bottom: 1px solid #1a2535;
+  flex-shrink: 0;
+}
+
+.wolf-tab {
+  flex: 1;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  color: #6b82a0;
+  font-size: 0.75rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.15s;
+}
+.wolf-tab:hover { background: #0f1825; color: #aeb8c6; }
+.wolf-tab.active { background: #0f1825; color: #eef2f7; border-bottom: 2px solid #4a8fff; }
+
+.wolf-tab-count {
+  margin-left: auto;
+  background: #1a2535;
+  color: #6b82a0;
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-size: 0.7rem;
+}
+
+.wolf-loading { padding: 20px; color: #4a6080; font-size: 0.8rem; }
+
+.wolf-empty {
+  padding: 24px 16px;
+  color: #4a6080;
+  font-size: 0.82rem;
+}
+
+.wolf-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.wolf-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #111827;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.wolf-item:hover { background: #0f1825; }
+.wolf-item.active { background: #0d1b2e; border-left: 3px solid #4a8fff; }
+
+.wolf-item-main { flex: 1; min-width: 0; }
+.wolf-item-name { font-weight: 600; font-size: 0.85rem; color: #eef2f7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wolf-item-meta { font-size: 0.73rem; color: #6b82a0; margin-top: 2px; }
+.wolf-item-url { font-size: 0.7rem; color: #4a6080; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.wolf-item-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.wolf-badge {
+  font-size: 0.68rem;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.wolf-badge-ok { background: #22c55e22; color: #22c55e; }
+
+.wolf-score {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #4a8fff;
+}
+.wolf-wa { font-size: 0.65rem; background: #22c55e22; color: #22c55e; padding: 1px 5px; border-radius: 3px; }
+
+/* ── Painel direito ── */
+.wolf-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #0a0d14;
+}
+
+.wolf-panel-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #4a6080;
+  font-size: 0.85rem;
+}
+
+.wolf-panel-header {
+  padding: 20px 24px 14px;
+  border-bottom: 1px solid #1a2535;
+  flex-shrink: 0;
+}
+.wolf-panel-name { font-size: 1.05rem; font-weight: 700; color: #eef2f7; }
+.wolf-panel-meta { font-size: 0.78rem; color: #6b82a0; margin-top: 3px; }
+.wolf-panel-phone { color: #22c55e; }
+.wolf-panel-site { font-size: 0.75rem; color: #4a6080; margin-top: 6px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+
+.wolf-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wolf-label { font-size: 0.75rem; color: #6b82a0; text-transform: uppercase; letter-spacing: 0.05em; }
+
+.wolf-textarea {
+  width: 100%;
+  background: #0f1825;
+  border: 1px solid #1a2535;
+  border-radius: 8px;
+  color: #eef2f7;
+  padding: 12px;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  resize: vertical;
+  font-family: inherit;
+}
+.wolf-textarea:focus { outline: none; border-color: #4a8fff; }
+
+.wolf-send-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* ── Wolf Auto Panel ── */
+.wolf-panel-auto { background: #080c14; }
+
+.wolf-auto-panel {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.wolf-auto-header { border-bottom: 1px solid #1a2535; padding-bottom: 16px; }
+.wolf-auto-title { font-size: 1.1rem; font-weight: 700; color: #f59e0b; display: block; }
+.wolf-auto-sub { font-size: 0.75rem; color: #4a6080; margin-top: 4px; display: block; }
+
+.wolf-auto-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #0f1825;
+  border: 1px solid #1a2535;
+  border-radius: 10px;
+  padding: 16px 20px;
+}
+.wolf-auto-toggle-label { font-weight: 600; font-size: 0.9rem; color: #eef2f7; }
+.wolf-auto-toggle-hint { font-size: 0.73rem; color: #4a6080; margin-top: 3px; }
+
+.wolf-toggle-btn {
+  padding: 8px 20px;
+  border-radius: 8px;
+  border: 1px solid #2a374a;
+  background: #1a2535;
+  color: #6b82a0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.wolf-toggle-btn:hover { border-color: #4a8fff; color: #eef2f7; }
+.wolf-toggle-btn.on { background: #f59e0b22; border-color: #f59e0b; color: #f59e0b; }
+.wolf-toggle-btn.on:hover { background: #f59e0b33; }
+
+.wolf-auto-section-title { font-size: 0.7rem; color: #4a6080; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+
+.wolf-auto-templates { display: flex; flex-direction: column; gap: 8px; }
+.wolf-template-preview {
+  display: flex;
+  gap: 10px;
+  background: #0f1825;
+  border: 1px solid #1a2535;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 0.78rem;
+  color: #aeb8c6;
+  line-height: 1.5;
+}
+.wolf-template-num {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  background: #f59e0b22;
+  color: #f59e0b;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  margin-top: 1px;
+}
+
+.wolf-auto-actions { display: flex; gap: 12px; }
+
+.wolf-auto-last-run {
+  background: #0f1825;
+  border: 1px solid #1a2535;
+  border-radius: 10px;
+  padding: 16px 20px;
+}
+.wolf-auto-stats { display: flex; gap: 24px; margin: 12px 0 8px; }
+.wolf-auto-stat { display: flex; flex-direction: column; align-items: center; }
+.wolf-auto-stat span { font-size: 1.6rem; font-weight: 700; color: #22c55e; line-height: 1; }
+.wolf-auto-stat small { font-size: 0.7rem; color: #4a6080; margin-top: 3px; }
+.wolf-auto-stat-fail span { color: #ef4444; }
+.wolf-auto-ran-at { font-size: 0.73rem; color: #4a6080; }
 
 .proj-modal-footer {
   display: flex;

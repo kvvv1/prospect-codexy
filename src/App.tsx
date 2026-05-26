@@ -159,6 +159,16 @@ type SiteCheckResult = {
   error: string | null
 }
 
+type SiteHealth = {
+  status: number | null
+  responseMs: number | null
+  error: string | null
+  url: string
+  checkedAt: string
+}
+
+type WolfLead = Lead & { siteHealth: SiteHealth }
+
 type Project = {
   id: string
   name: string
@@ -286,6 +296,24 @@ function App() {
       }
     }, 5000)
     return () => clearInterval(poll)
+  }, [userQrCode])
+
+  useEffect(() => {
+    if (!userQrCode) return
+    const refresh = setInterval(async () => {
+      try {
+        const d = await api<{ whatsapp: WhatsAppStatus; qrcode: { base64?: string | null } }>('/api/users/me/whatsapp/connect', { method: 'POST' })
+        setWhatsapp(d.whatsapp)
+        if (d.whatsapp?.connectionStatus === 'open') {
+          setUserQrCode('')
+          setStatus('WhatsApp conectado com sucesso!')
+          return
+        }
+        const b64 = d.qrcode?.base64
+        if (b64) setUserQrCode(b64.startsWith('data:') ? b64 : `data:image/png;base64,${b64}`)
+      } catch { /* ignore */ }
+    }, 20000)
+    return () => clearInterval(refresh)
   }, [userQrCode])
 
   async function connectWhatsApp() {
@@ -2042,7 +2070,15 @@ function FollowUpView({ followUps, onDone }: { followUps: FollowUp[]; onDone: (f
 
 function WhatsAppView({ whatsapp, qrCode, onConnect, onRefresh }: { whatsapp: WhatsAppStatus | null; qrCode: string; onConnect: () => Promise<void>; onRefresh: () => void }) {
   const [isConnecting, setIsConnecting] = useState(false)
+  const [countdown, setCountdown] = useState(20)
   const isConnected = whatsapp?.connectionStatus === 'open'
+
+  useEffect(() => {
+    if (!qrCode) return
+    setCountdown(20)
+    const tick = setInterval(() => setCountdown((c) => (c <= 1 ? 20 : c - 1)), 1000)
+    return () => clearInterval(tick)
+  }, [qrCode])
 
   async function handleConnect() {
     setIsConnecting(true)
@@ -2072,6 +2108,9 @@ function WhatsAppView({ whatsapp, qrCode, onConnect, onRefresh }: { whatsapp: Wh
           <div>
             <strong>Escaneie o QR Code</strong>
             <span>WhatsApp &gt; Aparelhos conectados &gt; Conectar aparelho</span>
+            <span className={`qr-countdown${countdown <= 5 ? ' urgent' : ''}`}>
+              {countdown <= 5 ? `⚠ Atualizando em ${countdown}s…` : `Atualiza automaticamente em ${countdown}s`}
+            </span>
           </div>
           <img src={qrCode} alt="QR Code do WhatsApp" />
         </div>
@@ -2276,7 +2315,7 @@ function ProjectsBoardView() {
 }
 
 function AdminView({ dashboard, runs }: { dashboard: Dashboard | null; assignments?: Assignment[]; runs: SearchRun[] }) {
-  const [adminTab, setAdminTab] = useState<'users' | 'trojan' | 'sites' | 'projects'>('users')
+  const [adminTab, setAdminTab] = useState<'users' | 'trojan' | 'sites' | 'projects' | 'wolf'>('users')
   const [users, setUsers] = useState<AdminUser[]>([])
   const [form, setForm] = useState({ name: '', username: '', password: '', role: 'Comercial' })
   const [editing, setEditing] = useState<AdminUser | null>(null)
@@ -2414,11 +2453,13 @@ function AdminView({ dashboard, runs }: { dashboard: Dashboard | null; assignmen
         <button type="button" className={adminTab === 'projects' ? 'active' : ''} onClick={() => setAdminTab('projects')}>Projetos</button>
         <button type="button" className={adminTab === 'trojan' ? 'active' : ''} onClick={() => setAdminTab('trojan')}>Cavalo de Troia</button>
         <button type="button" className={adminTab === 'sites' ? 'active' : ''} onClick={() => setAdminTab('sites')}>Sites Quebrados</button>
+        <button type="button" className={`${adminTab === 'wolf' ? 'active' : ''} admin-tab-wolf`} onClick={() => setAdminTab('wolf')}>Lobo de Wall Street</button>
       </div>
 
       {adminTab === 'projects' && <ProjectsBoardView />}
       {adminTab === 'trojan' && <TrojanView />}
       {adminTab === 'sites' && <SiteHealthView />}
+      {adminTab === 'wolf' && <WolfView />}
 
       {adminTab === 'users' && (
     <section className="content-grid" style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
@@ -2578,6 +2619,344 @@ function AdminView({ dashboard, runs }: { dashboard: Dashboard | null; assignmen
 
     </section>
       )}
+    </div>
+  )
+}
+
+type WolfCron = {
+  enabled: boolean
+  dailyLimit: number
+  lastRunAt: string | null
+  lastRunStats: { sent: number; failed: number; total: number; ranAt: string } | null
+}
+
+function WolfView() {
+  const [brokenLeads, setBrokenLeads] = useState<WolfLead[]>([])
+  const [approvedLeads, setApprovedLeads] = useState<Assignment[]>([])
+  const [loading, setLoading] = useState(true)
+  const [tab, setTab] = useState<'broken' | 'approved' | 'auto'>('broken')
+  const [selectedLead, setSelectedLead] = useState<{ type: 'broken'; lead: WolfLead } | { type: 'approved'; assignment: Assignment } | null>(null)
+  const [message, setMessage] = useState('')
+  const [sending, setSending] = useState(false)
+  const [sendStatus, setSendStatus] = useState<{ ok: boolean; msg: string } | null>(null)
+  const [wolfCron, setWolfCron] = useState<WolfCron | null>(null)
+  const [cronSaving, setCronSaving] = useState(false)
+  const [runningNow, setRunningNow] = useState(false)
+
+  async function fetchData() {
+    try {
+      const [wolfData, cronData] = await Promise.all([
+        api<{ brokenLeads: WolfLead[]; approvedLeads: Assignment[] }>('/api/admin/wolf'),
+        api<{ wolfCron: WolfCron }>('/api/admin/wolf/cron'),
+      ])
+      setBrokenLeads(wolfData.brokenLeads)
+      setApprovedLeads(wolfData.approvedLeads)
+      setWolfCron(cronData.wolfCron)
+    } catch { /* ignore */ } finally {
+      setLoading(false)
+    }
+  }
+
+  async function toggleCron(enabled: boolean) {
+    setCronSaving(true)
+    try {
+      const data = await api<{ wolfCron: WolfCron }>('/api/admin/wolf/cron', { method: 'POST', body: JSON.stringify({ enabled }) })
+      setWolfCron(data.wolfCron)
+    } catch { /* ignore */ } finally {
+      setCronSaving(false)
+    }
+  }
+
+  async function runNow() {
+    if (!confirm('Disparar Lobo Automático agora? Vai enviar até 50 mensagens com delay de segurança.')) return
+    setRunningNow(true)
+    try {
+      const data = await api<{ wolfCron: WolfCron }>('/api/admin/wolf/cron/run-now', { method: 'POST' })
+      setWolfCron(data.wolfCron)
+      await fetchData()
+    } catch { /* ignore */ } finally {
+      setRunningNow(false)
+    }
+  }
+
+  useEffect(() => { fetchData() }, [])
+
+  function buildTemplate(lead: Lead, health?: SiteHealth): string {
+    const first = lead.name.split(' ')[0]
+    if (!health) {
+      return `${first}, acabei de analisar a ${lead.name} em ${lead.city} e tô vendo clientes indo direto pra concorrência que aparece no Google — e vocês não aparecem. Isso é faturamento real escorrendo pelo ralo todo dia. Coloco a ${lead.name} na frente em 48h ou não me paga nada. Me manda um SIM que eu te mando a proposta agora.`
+    }
+    const url = health.url
+    if (health.error === 'timeout') {
+      return `${first}, o site da ${lead.name} (${url}) tá completamente fora do ar agora — cada cliente que tenta te encontrar online vai direto pro concorrente. Resolvo, coloco no ar e ainda melhoro a presença de vocês no Google, tudo em 48h com garantia total. Sem resultado em 30 dias, devolvo tudo. Me manda SIM.`
+    }
+    if (health.status === 404) {
+      return `${first}, o site da ${lead.name} (${url}) tá retornando erro 404 — qualquer cliente que tenta acessar vê tela de erro e vai embora pra sempre. Cada dia que isso fica assim é dinheiro perdido. Resolvo hoje e ainda melhoro o ranqueamento no Google com garantia. Me manda SIM e a gente começa agora.`
+    }
+    if (health.status != null && health.status >= 500) {
+      return `${first}, o site da ${lead.name} (${url}) tá com erro grave (${health.status}) — seus clientes estão vendo tela de erro e indo pra concorrência. Prejuízo real acontecendo agora enquanto você lê isso. Resolvo e coloco a ${lead.name} aparecendo no Google com garantia de resultado em 30 dias ou devolução total. Me manda SIM.`
+    }
+    if (health.status != null && health.status >= 400) {
+      return `${first}, o site da ${lead.name} (${url}) tá com erro ${health.status} — clientes que tentam te encontrar online tão tendo experiência péssima e indo pro concorrente. Resolvo hoje e melhoro a presença digital da ${lead.name} com garantia total. Sem resultado em 30 dias, você não paga nada. Me manda SIM.`
+    }
+    return `${first}, o site da ${lead.name} tá lento — e site lento afasta cliente. 53% das pessoas abandonam site que demora mais de 3 segundos. Seus concorrentes em ${lead.city} estão captando esses clientes agora. Resolvo a performance e melhoro o ranqueamento de vocês com garantia de resultado. Me manda SIM.`
+  }
+
+  function selectBroken(lead: WolfLead) {
+    setSelectedLead({ type: 'broken', lead })
+    setMessage(buildTemplate(lead, lead.siteHealth))
+    setSendStatus(null)
+  }
+
+  function selectApproved(assignment: Assignment) {
+    setSelectedLead({ type: 'approved', assignment })
+    setMessage(assignment.approach || buildTemplate(assignment.lead))
+    setSendStatus(null)
+  }
+
+  async function send() {
+    if (!selectedLead || !message.trim()) return
+    const leadId = selectedLead.type === 'broken' ? selectedLead.lead.id : selectedLead.assignment.lead.id
+    setSending(true)
+    setSendStatus(null)
+    try {
+      await api('/api/admin/wolf/send', { method: 'POST', body: JSON.stringify({ leadId, text: message }) })
+      setSendStatus({ ok: true, msg: 'Mensagem enviada! Lead movido para "Mensagem enviada".' })
+      await fetchData()
+    } catch (err) {
+      setSendStatus({ ok: false, msg: err instanceof Error ? err.message : 'Erro ao enviar.' })
+    } finally {
+      setSending(false)
+    }
+  }
+
+  function siteHealthBadge(health: SiteHealth): { label: string; color: string } {
+    if (health.error === 'timeout') return { label: 'Timeout', color: '#ef4444' }
+    if (health.status != null && health.status >= 500) return { label: `Erro ${health.status}`, color: '#ef4444' }
+    if (health.status != null && health.status >= 400) return { label: `Erro ${health.status}`, color: '#f97316' }
+    return { label: health.error || 'Erro', color: '#ef4444' }
+  }
+
+  const currentLead = selectedLead?.type === 'broken'
+    ? selectedLead.lead
+    : selectedLead?.type === 'approved'
+      ? selectedLead.assignment.lead
+      : null
+
+  return (
+    <div className="wolf-view">
+
+      {/* ── Sidebar ── */}
+      <div className="wolf-sidebar">
+        <div className="wolf-tabs">
+          <button type="button" className={`wolf-tab${tab === 'broken' ? ' active' : ''}`} onClick={() => setTab('broken')}>
+            <span style={{ color: '#ef4444' }}>●</span> Sites Quebrados
+            <span className="wolf-tab-count">{brokenLeads.length}</span>
+          </button>
+          <button type="button" className={`wolf-tab${tab === 'approved' ? ' active' : ''}`} onClick={() => setTab('approved')}>
+            <span style={{ color: '#22c55e' }}>●</span> Leads Aprovados
+            <span className="wolf-tab-count">{approvedLeads.length}</span>
+          </button>
+          <button type="button" className={`wolf-tab${tab === 'auto' ? ' active' : ''}`} onClick={() => setTab('auto')} style={{ borderTop: '1px solid #1a2535' }}>
+            <span style={{ color: wolfCron?.enabled ? '#f59e0b' : '#4a6080' }}>⚡</span> Automático
+          </button>
+        </div>
+
+        {loading && <div className="wolf-loading">Carregando…</div>}
+
+        {tab === 'broken' && !loading && (
+          <div className="wolf-list">
+            {brokenLeads.length === 0 && (
+              <div className="wolf-empty">
+                <p>Nenhum site quebrado salvo ainda.</p>
+                <p style={{ fontSize: '0.75rem', color: '#4a6080', marginTop: 6 }}>Execute o Scanner na aba "Sites Quebrados" primeiro.</p>
+              </div>
+            )}
+            {brokenLeads.map((lead) => {
+              const badge = siteHealthBadge(lead.siteHealth)
+              const isSelected = selectedLead?.type === 'broken' && selectedLead.lead.id === lead.id
+              return (
+                <div
+                  key={lead.id}
+                  className={`wolf-item${isSelected ? ' active' : ''}`}
+                  onClick={() => selectBroken(lead)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => e.key === 'Enter' && selectBroken(lead)}
+                >
+                  <div className="wolf-item-main">
+                    <div className="wolf-item-name">{lead.name}</div>
+                    <div className="wolf-item-meta">{[lead.category, lead.city].filter(Boolean).join(' · ')}</div>
+                    <div className="wolf-item-url">{lead.siteHealth.url}</div>
+                  </div>
+                  <div className="wolf-item-right">
+                    <span className="wolf-badge" style={{ background: `${badge.color}22`, color: badge.color }}>{badge.label}</span>
+                    {lead.score != null && <span className="wolf-score">{lead.score}</span>}
+                    {lead.phone && <span className="wolf-wa">WA</span>}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {tab === 'approved' && !loading && (
+          <div className="wolf-list">
+            {approvedLeads.length === 0 && <div className="wolf-empty"><p>Nenhum lead aprovado com telefone.</p></div>}
+            {approvedLeads.map((a) => {
+              const isSelected = selectedLead?.type === 'approved' && selectedLead.assignment.id === a.id
+              return (
+                <div
+                  key={a.id}
+                  className={`wolf-item${isSelected ? ' active' : ''}`}
+                  onClick={() => selectApproved(a)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => e.key === 'Enter' && selectApproved(a)}
+                >
+                  <div className="wolf-item-main">
+                    <div className="wolf-item-name">{a.lead.name}</div>
+                    <div className="wolf-item-meta">{[a.lead.category, a.lead.city].filter(Boolean).join(' · ')}</div>
+                    <div className="wolf-item-url">{a.nextAction || a.stage}</div>
+                  </div>
+                  <div className="wolf-item-right">
+                    <span className="wolf-badge wolf-badge-ok">{a.stage}</span>
+                    {a.lead.score != null && <span className="wolf-score">{a.lead.score}</span>}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── Painel de envio ── */}
+      <div className={`wolf-panel${tab === 'auto' ? ' wolf-panel-auto' : ''}`}>
+        {tab === 'auto' && (
+          <div className="wolf-auto-panel">
+            <div className="wolf-auto-header">
+              <span className="wolf-auto-title">⚡ Lobo Automático</span>
+              <span className="wolf-auto-sub">Disparo às 9h todo dia · {wolfCron?.dailyLimit || 50} leads · delay 3–8s</span>
+            </div>
+
+            <div className="wolf-auto-toggle-row">
+              <div>
+                <div className="wolf-auto-toggle-label">{wolfCron?.enabled ? 'Ativado' : 'Desativado'}</div>
+                <div className="wolf-auto-toggle-hint">{wolfCron?.enabled ? 'Vai disparar amanhã às 9h automaticamente.' : 'Ligue para ativar o disparo diário.'}</div>
+              </div>
+              <button
+                type="button"
+                className={`wolf-toggle-btn${wolfCron?.enabled ? ' on' : ''}`}
+                onClick={() => toggleCron(!wolfCron?.enabled)}
+                disabled={cronSaving}
+              >
+                {cronSaving ? '…' : wolfCron?.enabled ? 'Desligar' : 'Ligar'}
+              </button>
+            </div>
+
+            <div className="wolf-auto-templates">
+              <div className="wolf-auto-section-title">5 abordagens rotativas (nível Lobo)</div>
+              {[
+                'Oi [nome]! Toda semana você perde clientes pra concorrente que aparece no Google e você não. Resolvo isso em 48h. Quer ver?',
+                '[nome], fiz uma análise da [empresa] em [cidade]. Tá deixando dinheiro na mesa todo dia sem presença digital forte. 2 minutos?',
+                'Oi [nome]! [categoria] em [cidade] que não aparece online perde clientes pra quem aparece. Posso mudar isso essa semana.',
+                '[nome], a [empresa] tem potencial pra dobrar os contatos online. Já fiz isso pra vários [categoria] em [cidade]. Bora conversar?',
+                'Oi [nome]! Seu concorrente já capta clientes online enquanto a [empresa] depende só de indicação. Tenho solução rápida. Interesse?',
+              ].map((t, i) => (
+                <div key={i} className="wolf-template-preview">
+                  <span className="wolf-template-num">{i + 1}</span>
+                  <span>{t}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="wolf-auto-actions">
+              <button
+                type="button"
+                className="primary-button"
+                onClick={runNow}
+                disabled={runningNow}
+              >
+                {runningNow ? <><span className="send-spinner" />Disparando…</> : '▶ Disparar agora'}
+              </button>
+            </div>
+
+            {wolfCron?.lastRunStats && (
+              <div className="wolf-auto-last-run">
+                <div className="wolf-auto-section-title">Último disparo</div>
+                <div className="wolf-auto-stats">
+                  <div className="wolf-auto-stat">
+                    <span>{wolfCron.lastRunStats.sent}</span>
+                    <small>enviados</small>
+                  </div>
+                  <div className="wolf-auto-stat wolf-auto-stat-fail">
+                    <span>{wolfCron.lastRunStats.failed}</span>
+                    <small>falhas</small>
+                  </div>
+                  <div className="wolf-auto-stat">
+                    <span>{wolfCron.lastRunStats.total}</span>
+                    <small>total</small>
+                  </div>
+                </div>
+                <div className="wolf-auto-ran-at">
+                  {wolfCron.lastRunAt ? formatDate(wolfCron.lastRunAt) : '—'}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab !== 'auto' && selectedLead ? (
+          <>
+            <div className="wolf-panel-header">
+              <div className="wolf-panel-name">{currentLead?.name}</div>
+              <div className="wolf-panel-meta">
+                {[currentLead?.category, currentLead?.city].filter(Boolean).join(' · ')}
+                {currentLead?.phone && <span className="wolf-panel-phone"> · {currentLead.phone}</span>}
+              </div>
+              {selectedLead.type === 'broken' && (
+                <div className="wolf-panel-site">
+                  {selectedLead.lead.siteHealth.url}
+                  <span className="wolf-badge" style={{ marginLeft: 8, background: `${siteHealthBadge(selectedLead.lead.siteHealth).color}22`, color: siteHealthBadge(selectedLead.lead.siteHealth).color }}>
+                    {siteHealthBadge(selectedLead.lead.siteHealth).label}
+                  </span>
+                </div>
+              )}
+              {selectedLead.type === 'approved' && (
+                <div className="wolf-panel-site">Etapa atual: {selectedLead.assignment.stage}</div>
+              )}
+            </div>
+
+            <div className="wolf-panel-body">
+              <label className="wolf-label">Mensagem (editável antes de enviar)</label>
+              <textarea
+                className="wolf-textarea"
+                rows={7}
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+              />
+              <div className="wolf-send-row">
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={send}
+                  disabled={sending || !message.trim() || !currentLead?.phone}
+                  title={!currentLead?.phone ? 'Lead sem telefone' : ''}
+                >
+                  {sending ? <><span className="send-spinner" />Enviando…</> : 'Enviar via WhatsApp'}
+                </button>
+                {!currentLead?.phone && <span style={{ fontSize: '0.75rem', color: '#ef4444' }}>Lead sem telefone</span>}
+              </div>
+              {sending && <p className="send-delay-hint">Aguardando delay de segurança para proteger sua conta…</p>}
+              {sendStatus && <p className={sendStatus.ok ? 'form-success' : 'form-error'}>{sendStatus.msg}</p>}
+            </div>
+          </>
+        ) : tab !== 'auto' ? (
+          <div className="wolf-panel-empty">
+            <p>Selecione um lead para ver a mensagem pré-pronta e enviar.</p>
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }
