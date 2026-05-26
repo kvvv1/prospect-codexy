@@ -4293,7 +4293,8 @@ button:disabled {
 .wolf-view {
   display: grid;
   grid-template-columns: 340px 1fr;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
