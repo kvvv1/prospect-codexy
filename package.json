@@ -9,11 +9,13 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "db:migrate": "node server/migrate-json.js"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "mysql2": "^3.22.4",
     "node-cron": "^4.2.1",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
