@@ -4,7 +4,7 @@ import cron from 'node-cron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { clearSessionCookie, createSessionCookie, getSession, requireAuth } from './auth.js'
-import { connectInstance, deleteInstance, ensureInstance, getInstanceStatus, sendWhatsAppText } from './evolution.js'
+import { checkWhatsAppNumber, connectInstance, deleteInstance, ensureInstance, getInstanceStatus, sendWhatsAppText } from './evolution.js'
 import { buildProspectingPreview, generateApproach, generateFollowUp, runProspectingSearch } from './prospecting.js'
 import { enrichByCnpj, searchCnpjByName } from './cnpj.js'
 import {
@@ -22,6 +22,15 @@ import {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const randomDelay = (min, max) => sleep(min + Math.random() * (max - min))
+
+function providerSendError(result) {
+  const providerMessage = Array.isArray(result?.data?.message)
+    ? result.data.message.join(' ')
+    : result?.data?.message || result?.data?.error
+  return typeof providerMessage === 'string' && providerMessage.trim()
+    ? providerMessage
+    : 'O WhatsApp nao aceitou o envio. Verifique o numero e tente novamente.'
+}
 
 const app = express()
 const port = Number(process.env.PORT || 3004)
@@ -374,6 +383,11 @@ app.post('/api/follow-ups/:id/send', async (req, res, next) => {
       return res.status(409).json({ error: 'Conecte o WhatsApp comercial antes de enviar.' })
     }
 
+    const whatsappNumber = await checkWhatsAppNumber({ number: targetNumber, instanceName: user.evolutionInstanceName })
+    if (!whatsappNumber.exists) {
+      return res.status(422).json({ error: 'Este telefone nao possui WhatsApp ativo. Escolha outro contato antes de enviar.' })
+    }
+
     await randomDelay(1000, 3000)
     const result = await sendWhatsAppText({ number: targetNumber, text, instanceName: user.evolutionInstanceName })
 
@@ -389,9 +403,11 @@ app.post('/api/follow-ups/:id/send', async (req, res, next) => {
       createdAt: new Date().toISOString(),
     })
 
-    followUp.status = 'done'
-    followUp.completedAt = new Date().toISOString()
     if (req.body.text) followUp.text = req.body.text
+    if (result.ok) {
+      followUp.status = 'done'
+      followUp.completedAt = new Date().toISOString()
+    }
 
     const assignment = followUp.assignmentId ? store.assignments.find((a) => a.id === followUp.assignmentId) : null
     if (assignment) {
@@ -402,10 +418,15 @@ app.post('/api/follow-ups/:id/send', async (req, res, next) => {
         text: result.ok ? `Follow-up ${followUp.step} enviado via WhatsApp.` : `Falha ao enviar follow-up ${followUp.step}.`,
       })
     }
-    if (lead) lead.lastContactAt = new Date().toISOString()
-    addActivity(store, { type: 'follow_up_sent', userId: user.id, leadId: followUp.leadId, text: `Follow-up ${followUp.step} enviado via WhatsApp.` })
+    if (result.ok && lead) lead.lastContactAt = new Date().toISOString()
+    addActivity(store, {
+      type: result.ok ? 'follow_up_sent' : 'follow_up_failed',
+      userId: user.id,
+      leadId: followUp.leadId,
+      text: result.ok ? `Follow-up ${followUp.step} enviado via WhatsApp.` : `Falha ao enviar follow-up ${followUp.step}.`,
+    })
     await writeStore(store)
-    res.json({ ok: result.ok })
+    res.status(result.ok ? 200 : 502).json(result.ok ? { ok: true } : { ok: false, error: providerSendError(result) })
   } catch (error) {
     next(error)
   }
@@ -511,6 +532,11 @@ app.post('/api/messages/send', async (req, res, next) => {
       })
     }
 
+    const whatsappNumber = await checkWhatsAppNumber({ number: targetNumber, instanceName: user.evolutionInstanceName })
+    if (!whatsappNumber.exists) {
+      return res.status(422).json({ error: 'Este telefone nao possui WhatsApp ativo. Escolha outro contato antes de enviar.' })
+    }
+
     await randomDelay(1000, 3000)
     const result = await sendWhatsAppText({ number: targetNumber, text, instanceName: user.evolutionInstanceName })
     store.messages.push({
@@ -537,7 +563,7 @@ app.post('/api/messages/send', async (req, res, next) => {
 
     if (lead) lead.lastContactAt = new Date().toISOString()
     await writeStore(store)
-    res.status(result.ok ? 200 : 502).json(result)
+    res.status(result.ok ? 200 : 502).json(result.ok ? result : { ...result, error: providerSendError(result) })
   } catch (error) {
     next(error)
   }
@@ -878,11 +904,22 @@ app.post('/api/admin/site-health', requireAuth, async (req, res, next) => {
   try {
     if (!isAdmin(req.user)) return res.status(403).json({ error: 'Acesso restrito a administradores.' })
     const store = await readStore()
-    const cityFilter = req.body.city ? String(req.body.city).toLowerCase().trim() : null
-    const leadsWithSites = store.leadPool
+    const normalizeFilter = (value) => String(value || '').toLocaleLowerCase('pt-BR').trim()
+    const cityFilter = normalizeFilter(req.body.city)
+    const categoryFilter = normalizeFilter(req.body.category)
+    const termFilter = normalizeFilter(req.body.term)
+    const minScore = req.body.minScore === undefined || req.body.minScore === '' ? null : Number(req.body.minScore)
+    const requirePhone = req.body.requirePhone !== false
+    const limit = Math.min(100, Math.max(1, Number(req.body.limit) || 50))
+    const matchingLeads = store.leadPool
       .filter((l) => (l.website || l.site) && String(l.website || l.site).trim())
-      .filter((l) => !cityFilter || (l.city && String(l.city).toLowerCase().includes(cityFilter)))
-      .slice(0, 500)
+      .filter((l) => !cityFilter || normalizeFilter(l.city).includes(cityFilter))
+      .filter((l) => !categoryFilter || normalizeFilter(l.category).includes(categoryFilter))
+      .filter((l) => !termFilter || normalizeFilter(`${l.name} ${l.category} ${l.website || l.site}`).includes(termFilter))
+      .filter((l) => minScore === null || (Number(l.score) || 0) >= minScore)
+      .filter((l) => !requirePhone || Boolean(l.phone))
+      .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0))
+    const leadsWithSites = matchingLeads.slice(0, limit)
 
     async function checkOne(lead) {
       let url = String(lead.website || lead.site).trim()
@@ -893,29 +930,32 @@ app.post('/api/admin/site-health', requireAuth, async (req, res, next) => {
       let responseMs = null
       try {
         const controller = new AbortController()
-        const timer = setTimeout(() => controller.abort(), 8000)
-        let resp = await fetch(url, {
-          signal: controller.signal,
-          method: 'HEAD',
-          redirect: 'follow',
-          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SiteHealthChecker/1.0)' },
-        })
-        // Some servers reject HEAD — fallback to GET
-        if (resp.status === 405) {
-          resp = await fetch(url, { signal: controller.signal, method: 'GET', redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0' } })
+        const timer = setTimeout(() => controller.abort(), 4000)
+        try {
+          let resp = await fetch(url, {
+            signal: controller.signal,
+            method: 'HEAD',
+            redirect: 'follow',
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SiteHealthChecker/1.0)' },
+          })
+          // Some servers reject HEAD; fall back to a lightweight GET.
+          if (resp.status === 405) {
+            resp = await fetch(url, { signal: controller.signal, method: 'GET', redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0' } })
+          }
+          responseMs = Date.now() - start
+          status = resp.status
+        } finally {
+          clearTimeout(timer)
         }
-        clearTimeout(timer)
-        responseMs = Date.now() - start
-        status = resp.status
       } catch (err) {
         responseMs = Date.now() - start
         errorMsg = err.name === 'AbortError' ? 'timeout' : (err.message || 'error')
       }
-      return { id: lead.id, name: lead.name, url, status, responseMs, error: errorMsg }
+      return { id: lead.id, name: lead.name, category: lead.category, city: lead.city, phone: lead.phone, score: lead.score, url, status, responseMs, error: errorMsg }
     }
 
-    // Process in parallel batches of 15
-    const CONCURRENCY = 15
+    // Keep total request time safely below the reverse proxy timeout.
+    const CONCURRENCY = 20
     const results = []
     for (let i = 0; i < leadsWithSites.length; i += CONCURRENCY) {
       const batch = leadsWithSites.slice(i, i + CONCURRENCY)
@@ -935,7 +975,7 @@ app.post('/api/admin/site-health', requireAuth, async (req, res, next) => {
     }
     await writeStore(store)
 
-    res.json({ results, total: leadsWithSites.length })
+    res.json({ results, total: leadsWithSites.length, matched: matchingLeads.length })
   } catch (err) {
     next(err)
   }
@@ -1077,9 +1117,7 @@ app.post('/api/admin/wolf/send', requireAuth, async (req, res, next) => {
     })
 
     if (result.ok) {
-      assignment.stage = 'Mensagem enviada'
-      assignment.updatedAt = new Date().toISOString()
-      assignment.history.push({ at: assignment.updatedAt, type: 'sent', text: 'Mensagem enviada via Lobo de Wall Street.' })
+      assignment = registerWolfSentInPipeline(store, user, lead, text.trim(), 'Mensagem enviada via Lobo de Wall Street.') || assignment
       lead.lastContactAt = new Date().toISOString()
     }
 
@@ -1095,16 +1133,33 @@ app.post('/api/admin/wolf/send', requireAuth, async (req, res, next) => {
 // ── Lobo de Wall Street — Automático ─────────────────────────────────────────
 
 const wolfTemplates = [
-  (lead) => `${lead.name.split(' ')[0]}, acabei de analisar a ${lead.name} em ${lead.city} e tô vendo uns 20 a 40 clientes por mês indo direto pra concorrência que aparece no Google — e você não aparece. Isso é faturamento real escorrendo pelo ralo todo dia. Coloco a ${lead.name} na frente em 48h ou não me paga nada. Me manda um SIM que eu te mando a proposta agora.`,
-  (lead) => `${lead.name.split(' ')[0]}, a ${lead.name} tá invisível online enquanto seus concorrentes em ${lead.city} faturam com os clientes que deveriam ser seus. Calculei: com presença digital certa, você recupera no mínimo R$3k a R$8k por mês que tá perdendo agora. Trabalho com garantia — se não entregar resultado em 30 dias, devolvo tudo. Me fala SIM.`,
-  (lead) => `${lead.name.split(' ')[0]}, fiz uma análise rápida: todo ${lead.category} em ${lead.city} que não aparece no Google perde em média 35 clientes por mês pra quem aparece. São pessoas que pesquisaram, encontraram o concorrente e foram embora sem nem saber que a ${lead.name} existe. Resolvo isso essa semana. Garantia total. Manda SIM que a gente começa hoje.`,
-  (lead) => `${lead.name.split(' ')[0]}, você tá trabalhando duro pra manter a ${lead.name} de pé enquanto tem gente em ${lead.city} captando clientes no automático pela internet — clientes que deveriam ser seus. Já dobrei o faturamento de vários ${lead.category} só com presença digital certa. Faço o mesmo pela ${lead.name} com garantia de resultado ou devolução. Me dá uma chance — manda SIM.`,
-  (lead) => `${lead.name.split(' ')[0]}, enquanto você lê isso, alguém em ${lead.city} pesquisou "${lead.category}" no Google e foi pro seu concorrente — porque a ${lead.name} não apareceu. Isso acontece todo dia. Posso mudar esse cenário em 48h com garantia: resultado em 30 dias ou devolvo o investimento inteiro. Não tem risco pra você. Me manda SIM e eu te mostro exatamente como.`,
+  (lead) => `Oi! Toda semana a ${lead.name} perde clientes para concorrentes que aparecem melhor no Google. Posso melhorar essa presença digital em 48h. Quer ver como?`,
+  (lead) => `Oi! Fiz uma análise da ${lead.name} em ${lead.city}. A empresa pode estar deixando contatos na mesa por não ter uma presença digital forte. Posso te explicar em 2 minutos?`,
+  (lead) => `Oi! A ${lead.name} em ${lead.city} pode captar mais clientes quando aparece melhor online. Posso mostrar uma solução prática para esta semana?`,
+  (lead) => `Oi! A ${lead.name} tem potencial para receber mais contatos online. Tenho uma ideia direta para melhorar essa captação em ${lead.city}. Podemos conversar?`,
+  (lead) => `Oi! Vi uma oportunidade para a ${lead.name} conquistar clientes que hoje encontram concorrentes online primeiro. Tenho uma solução rápida. Tem interesse?`,
 ]
 
 function buildWolfTemplate(lead, index) {
   const fn = wolfTemplates[index % wolfTemplates.length]
   return fn(lead)
+}
+
+function registerWolfSentInPipeline(store, user, lead, text, historyText) {
+  let assignment = activeAssignmentForLead(store, lead.id)
+  if (!assignment) {
+    const claimed = claimLead(store, user, lead.id, { approach: text, stage: 'Mensagem enviada' })
+    assignment = claimed.assignment
+  }
+  if (!assignment) return null
+
+  const now = new Date().toISOString()
+  if (['Aprovado', 'Abordagem pronta'].includes(assignment.stage)) {
+    assignment.stage = 'Mensagem enviada'
+  }
+  assignment.updatedAt = now
+  assignment.history.push({ at: now, type: 'sent', text: historyText })
+  return assignment
 }
 
 function getLeadsEligibleForWolf(store) {
@@ -1126,39 +1181,66 @@ function getLeadsEligibleForWolf(store) {
 
   const combined = [...brokenLeads, ...approvedLeads]
   const unique = combined.filter((l, i, arr) => arr.findIndex((x) => x.id === l.id) === i)
-
-  // Fisher-Yates shuffle
-  for (let i = unique.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[unique[i], unique[j]] = [unique[j], unique[i]]
-  }
-  return unique
+  return unique.sort((a, b) => (b.score || 0) - (a.score || 0) || a.name.localeCompare(b.name, 'pt-BR'))
 }
 
-async function runWolfCron() {
+function getWolfPreview(store) {
+  const eligible = getLeadsEligibleForWolf(store)
+  const limit = store.wolfCron?.dailyLimit || 50
+  const targets = eligible.slice(0, limit)
+  return {
+    eligibleCount: eligible.length,
+    scheduledCount: targets.length,
+    messages: targets.map((lead, index) => ({
+      leadId: lead.id,
+      company: lead.name,
+      city: lead.city || '',
+      phone: lead.phone,
+      text: buildWolfTemplate(lead, index),
+    })),
+  }
+}
+
+let wolfRunInProgress = false
+
+async function runWolfCron(options = {}) {
+  if (wolfRunInProgress) return { status: 'running' }
+  wolfRunInProgress = true
+  try {
+    return await executeWolfCron(options)
+  } finally {
+    wolfRunInProgress = false
+  }
+}
+
+async function executeWolfCron({ force = false } = {}) {
   const store = await readStore()
-  if (!store.wolfCron?.enabled) return
+  if (!force && !store.wolfCron?.enabled) return { status: 'disabled' }
 
   const adminUser = store.users.find((u) => isAdmin(u))
-  if (!adminUser) return
+  if (!adminUser) return { status: 'missing-admin' }
 
   const wStatus = await getInstanceStatus(adminUser.evolutionInstanceName).catch(() => null)
   if (!wStatus || wStatus.connectionStatus !== 'open') {
     console.log('[wolf-cron] WhatsApp admin desconectado — abortando.')
-    return
+    return { status: 'whatsapp-disconnected' }
   }
 
-  const eligible = getLeadsEligibleForWolf(store)
-  const limit = store.wolfCron.dailyLimit || 50
-  const targets = eligible.slice(0, limit)
+  const targets = getWolfPreview(store).messages
 
   let sent = 0
   let failed = 0
 
   for (let i = 0; i < targets.length; i++) {
     if (i > 0) await randomDelay(3000, 8000)
-    const lead = targets[i]
-    const text = buildWolfTemplate(lead, i)
+    const planned = targets[i]
+    const lead = store.leadPool.find((item) => item.id === planned.leadId)
+    if (!lead) {
+      failed++
+      continue
+    }
+    const text = planned.text
+    let assignment = activeAssignmentForLead(store, lead.id)
     let result
     try {
       result = await sendWhatsAppText({ number: lead.phone, text, instanceName: adminUser.evolutionInstanceName })
@@ -1166,11 +1248,15 @@ async function runWolfCron() {
       result = { ok: false }
     }
 
+    if (result.ok) {
+      assignment = registerWolfSentInPipeline(store, adminUser, lead, text, 'Mensagem enviada via Lobo Automático.') || assignment
+    }
+
     store.messages.push({
       id: createId('msg'),
       userId: adminUser.id,
       leadId: lead.id,
-      assignmentId: null,
+      assignmentId: assignment?.id || null,
       number: String(lead.phone).replace(/\D/g, ''),
       text,
       status: result.ok ? 'sent' : 'failed',
@@ -1199,12 +1285,13 @@ async function runWolfCron() {
 
   await writeStore(store)
   console.log(`[wolf-cron] Rodou: ${sent} enviados, ${failed} falhas.`)
+  return { status: 'completed', stats }
 }
 
 app.get('/api/admin/wolf/cron', requireAuth, async (req, res) => {
   if (!isAdmin(req.user)) return res.status(403).json({ error: 'Acesso restrito a administradores.' })
   const store = await readStore()
-  res.json({ wolfCron: store.wolfCron })
+  res.json({ wolfCron: store.wolfCron, preview: getWolfPreview(store), running: wolfRunInProgress })
 })
 
 app.post('/api/admin/wolf/cron', requireAuth, async (req, res) => {
@@ -1213,23 +1300,35 @@ app.post('/api/admin/wolf/cron', requireAuth, async (req, res) => {
   if (typeof req.body.enabled === 'boolean') store.wolfCron.enabled = req.body.enabled
   if (req.body.dailyLimit != null) store.wolfCron.dailyLimit = Math.min(150, Math.max(1, Number(req.body.dailyLimit)))
   await writeStore(store)
-  res.json({ wolfCron: store.wolfCron })
+  res.json({ wolfCron: store.wolfCron, preview: getWolfPreview(store), running: wolfRunInProgress })
 })
 
 app.post('/api/admin/wolf/cron/run-now', requireAuth, async (req, res, next) => {
   if (!isAdmin(req.user)) return res.status(403).json({ error: 'Acesso restrito a administradores.' })
   try {
-    await runWolfCron()
+    if (wolfRunInProgress) return res.status(409).json({ error: 'Já existe um disparo em andamento.' })
     const store = await readStore()
-    res.json({ wolfCron: store.wolfCron })
+    const adminUser = store.users.find((u) => isAdmin(u))
+    const wStatus = adminUser
+      ? await getInstanceStatus(adminUser.evolutionInstanceName).catch(() => null)
+      : null
+    if (!wStatus || wStatus.connectionStatus !== 'open') {
+      return res.status(409).json({ error: 'Conecte o WhatsApp do administrador antes de disparar.' })
+    }
+    void runWolfCron({ force: true }).catch((error) => console.error('[wolf-manual] Erro:', error.message))
+    res.status(202).json({ wolfCron: store.wolfCron, preview: getWolfPreview(store), running: true })
   } catch (error) {
     next(error)
   }
 })
 
-// Roda todo dia às 9h (horário do servidor)
+// Roda todo dia às 9h no horário de Brasília.
 cron.schedule('0 9 * * *', () => {
   runWolfCron().catch((err) => console.error('[wolf-cron] Erro:', err.message))
+}, { timezone: 'America/Sao_Paulo' })
+
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: 'Endpoint da API nao encontrado.' })
 })
 
 app.use(express.static(distDir))
@@ -1340,9 +1439,10 @@ function createDefaultFollowUps(store, lead, assignment, ownerId) {
 }
 
 function visibleAssignments(store, user, globalAccess = false) {
+  if (globalAccess) return store.assignments
   return store.assignments
     .filter((assignment) => assignment.status === 'active')
-    .filter((assignment) => globalAccess || assignment.ownerId === user.id)
+    .filter((assignment) => assignment.ownerId === user.id)
 }
 
 function visibleMessages(store, user, globalAccess = false) {
@@ -1395,6 +1495,7 @@ function autoReleaseStaleLeads(store) {
 
 // Libera assignments ativos sem nenhuma atividade há 7 dias para o pool
 function autoReleaseStaleAssignments(store) {
+  return 0
   const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
   let released = 0
   for (const assignment of store.assignments) {
@@ -1452,6 +1553,7 @@ function assignmentView(store, assignment) {
   const owner = store.users.find((item) => item.id === assignment.ownerId)
   return {
     ...assignment,
+    stage: assignment.status !== 'active' && assignment.stage !== 'Perdido' ? 'Inativo' : assignment.stage,
     lead: lead ? leadListView(store, lead) : null,
     ownerName: owner?.name || 'Sem responsável',
     pendingFollowUps: store.followUps.filter((followUp) => followUp.assignmentId === assignment.id && followUp.status === 'pending').length,

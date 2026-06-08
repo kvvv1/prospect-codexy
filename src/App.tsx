@@ -153,6 +153,10 @@ type WhatsAppStatus = {
 type SiteCheckResult = {
   id: string
   name: string
+  category?: string
+  city?: string
+  phone?: string
+  score?: number
   url: string
   status: number | null
   responseMs: number | null
@@ -216,7 +220,11 @@ const stageColor: Record<string, string> = {
 }
 
 function App() {
-  const introPreview = window.location.search.includes('introPreview=1')
+  const searchParams = new URLSearchParams(window.location.search)
+  const introPreview = searchParams.has('introPreview')
+  const postsPreview = searchParams.has('postsPreview')
+  const postsFeedPreview = searchParams.has('postsFeedPreview')
+  const postIndex = Math.max(0, Math.min(socialPostCards.length - 1, Number.parseInt(searchParams.get('post') || '0', 10) || 0))
   const [user, setUser] = useState<SessionUser | null>(null)
   const [isCheckingSession, setIsCheckingSession] = useState(true)
   const [assignments, setAssignments] = useState<Assignment[]>([])
@@ -397,6 +405,8 @@ function App() {
 
   if (isCheckingSession) return <div className="boot-screen">Carregando Codexy Prospect...</div>
   if (introPreview) return <LogoValidationScreen />
+  if (postsFeedPreview) return <SocialPostFeedScreen card={socialPostCards[postIndex]} index={postIndex} total={socialPostCards.length} />
+  if (postsPreview) return <SocialPostLibraryScreen />
   if (!user) return <LoginScreen onLogin={setUser} />
 
   const crmOpen = selectedAssignment != null
@@ -418,7 +428,7 @@ function App() {
       <header className="page-topbar">
         <Brand />
         <nav className="page-nav">
-          <button type="button" className={`page-nav-btn${view === 'kanban' ? ' active' : ''}`} onClick={() => setView('kanban')}>Pipeline</button>
+          <button type="button" className={`page-nav-btn${view === 'kanban' ? ' active' : ''}`} onClick={() => { setView('kanban'); refreshCore() }}>Pipeline</button>
           <button type="button" className={`page-nav-btn${view === 'approval' ? ' active' : ''}`} onClick={() => setView('approval')}>
             Aprovação{approvalCount > 0 ? <span className="page-nav-badge">{approvalCount}</span> : null}
           </button>
@@ -444,7 +454,7 @@ function App() {
         {view === 'kanban' && <KanbanView assignments={assignments} followUps={followUps} onOpenCrm={openCrm} onStage={updateStage} onRefresh={refreshCore} onRunAction={runAction} user={user} onDelete={deleteAssignment} />}
         {view === 'approval' && <ApprovalView user={user} onRefreshCore={refreshCore} onCountChange={setApprovalCount} />}
         {view === 'whatsapp' && <WhatsAppView whatsapp={whatsapp} qrCode={userQrCode} onConnect={connectWhatsApp} onRefresh={refreshWhatsapp} />}
-        {view === 'admin' && <AdminView dashboard={null} runs={[]} />}
+        {view === 'admin' && <AdminView dashboard={null} runs={[]} onPipelineRefresh={refreshCore} />}
       </div>
 
       {crmOpen && (
@@ -603,6 +613,165 @@ function LogoValidationScreen() {
     </main>
   )
 }
+
+type SocialPostCard = {
+  topic: string
+  lead: React.ReactNode
+  support: React.ReactNode[]
+  closing: React.ReactNode
+}
+
+const socialPostCards: SocialPostCard[] = [
+  {
+    topic: 'Automação',
+    lead: <>
+      Seu <span className="tweet-premium-strike">concorrente</span> já tem <span className="tweet-premium-accent">sistema.</span>
+    </>,
+    support: [
+      'Você ainda atualiza planilha manualmente, perde tempo com processos repetitivos e toma decisões no escuro.',
+      'Enquanto isso, ele fecha negócio em segundos.',
+    ],
+    closing: <>
+      A diferença não é sorte. É tecnologia. <span className="tweet-premium-arrow">→</span>
+    </>,
+  },
+  {
+    topic: 'CRM',
+    lead: 'Seu cliente lembra de você?',
+    support: [
+      'Ou apenas da concorrência que apareceu antes?',
+      'Quem acompanha o relacionamento vende com constância.',
+    ],
+    closing: 'CRM não é cadastro. É retenção.',
+  },
+  {
+    topic: 'Sistemas',
+    lead: 'Quem controla os dados controla o mercado.',
+    support: [
+      'Planilha mostra esforço.',
+      'Sistema mostra direção.',
+    ],
+    closing: 'Sem sistema, a decisão vem atrasada.',
+  },
+  {
+    topic: 'Gestão',
+    lead: 'Você administra a operação.',
+    support: [
+      'Ou a operação administra você.',
+      'Gestão boa corta ruído antes do problema crescer.',
+    ],
+    closing: 'Controle é o que separa caos de escala.',
+  },
+  {
+    topic: 'Inteligência Artificial',
+    lead: 'Algumas empresas contrataram mais pessoas.',
+    support: [
+      'Outras contrataram IA.',
+      'A diferença aparece no ritmo e no lucro.',
+    ],
+    closing: 'IA boa não faz barulho. Faz margem.',
+  },
+  {
+    topic: 'Produtividade',
+    lead: 'Horas extras não resolvem.',
+    support: [
+      'Elas só prolongam um processo ruim.',
+      'Processos inteligentes resolvem de verdade.',
+    ],
+    closing: 'Produtividade é desenhar melhor.',
+  },
+  {
+    topic: 'Transformação Digital',
+    lead: 'O mercado mudou.',
+    support: [
+      'Sua empresa mudou junto?',
+      'Quem demora para adaptar, perde espaço.',
+    ],
+    closing: 'Transformação digital é sobrevivência.',
+  },
+]
+
+function SocialPostLibraryScreen() {
+  return (
+    <main className="posts-library-screen">
+      <div className="posts-library-shell">
+        <header className="posts-library-hero">
+          <div className="posts-library-brand">
+            <div className="posts-library-logo">
+              <img src="/codexy-logo.png" alt="CODEXY" />
+            </div>
+            <div>
+              <span className="posts-library-kicker">CODEXY / TWEET PREMIUM</span>
+              <h1>Biblioteca visual para posts corporativos</h1>
+              <p>Layouts minimalistas, premium e prontos para parar o scroll.</p>
+            </div>
+          </div>
+          <div className="posts-library-note">
+            <strong>Estrutura</strong>
+            <span>Avatar, nome, selo, dor, contraste e fechamento direto.</span>
+          </div>
+        </header>
+
+        <section className="posts-library-grid" aria-label="Biblioteca de posts">
+          {socialPostCards.map((card, index) => (
+            <SocialPostCardFrame key={card.topic} card={card} index={index} compact />
+          ))}
+        </section>
+      </div>
+    </main>
+  )
+}
+
+function SocialPostFeedScreen({ card, index, total }: { card: SocialPostCard; index: number; total: number }) {
+  return (
+    <main className="posts-feed-screen">
+      <SocialPostCardFrame card={card} index={index} total={total} />
+    </main>
+  )
+}
+
+function SocialPostCardFrame({ card, index, total, compact = false }: { card: SocialPostCard; index: number; total?: number; compact?: boolean }) {
+  return (
+    <article className={`tweet-premium-card${compact ? ' compact' : ' feed'}`}>
+      <div className="tweet-premium-card-sheen" />
+      <div className="tweet-premium-card-inner">
+        <header className="tweet-premium-header">
+          <div className="tweet-premium-account">
+            <div className="tweet-premium-avatar">
+              CX
+            </div>
+            <div className="tweet-premium-ident">
+              <div className="tweet-premium-name-row">
+                <span className="tweet-premium-name">CODEXY</span>
+                <span className="tweet-premium-badge" aria-label="verificado">✓</span>
+              </div>
+              <span className="tweet-premium-handle">@codexy_dev</span>
+            </div>
+          </div>
+          {compact ? <span className="tweet-premium-topic">{card.topic}</span> : null}
+        </header>
+
+        <div className="tweet-premium-copy">
+          <p className="tweet-premium-lead">{card.lead}</p>
+          {card.support.map((line, i) => (
+            <p key={i} className="tweet-premium-line">{line}</p>
+          ))}
+          <p className="tweet-premium-closing">{card.closing}</p>
+        </div>
+
+        <footer className="tweet-premium-footer">
+          <div className="tweet-premium-footer-bar" />
+          <div className="tweet-premium-pagination" aria-hidden="true">
+            {Array.from({ length: total || 3 }, (_, i) => (
+              <span key={i} className={i === index ? 'is-active' : ''} />
+            ))}
+          </div>
+        </footer>
+      </div>
+    </article>
+  )
+}
+
 function LoginScreen({ onLogin }: { onLogin: (user: SessionUser) => void }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -714,13 +883,45 @@ function DayView({ dashboard, assignments, followUps, notifications, onOpenCrm, 
   )
 }
 
+const prospectNicheOptions = [
+  'Academia de musculação', 'Academia de pilates', 'Academia de crossfit', 'Personal trainer', 'Escola de natação',
+  'Clínica odontológica', 'Clínica de implante dentário', 'Clínica de ortodontia', 'Clínica de harmonização facial',
+  'Clínica de estética', 'Clínica de fisioterapia', 'Clínica de psicologia', 'Clínica veterinária', 'Laboratório de análises',
+  'Dermatologista', 'Oftalmologista', 'Nutricionista', 'Fonoaudiólogo', 'Terapeuta ocupacional', 'Casa de repouso',
+  'Salão de beleza', 'Barbearia', 'Esmalteria', 'Spa', 'Massoterapia', 'Depilação a laser',
+  'Restaurante', 'Pizzaria', 'Hamburgueria', 'Padaria', 'Confeitaria', 'Cafeteria', 'Marmitaria', 'Buffet para eventos',
+  'Imobiliária', 'Corretor de imóveis', 'Construtora', 'Administradora de condomínios', 'Arquitetura', 'Design de interiores',
+  'Escritório de advocacia', 'Contabilidade', 'Consultoria empresarial', 'Segurança do trabalho', 'Despachante',
+  'Oficina mecânica', 'Auto elétrica', 'Funilaria e pintura', 'Estética automotiva', 'Locadora de veículos', 'Autoescola',
+  'Escola particular', 'Escola infantil', 'Curso de idiomas', 'Curso profissionalizante', 'Reforço escolar',
+  'Loja de móveis planejados', 'Loja de materiais de construção', 'Loja de roupas', 'Loja de calçados', 'Ótica',
+  'Pet shop', 'Hotel para pets', 'Floricultura', 'Fotógrafo', 'Produtora de vídeo', 'Agência de viagens',
+  'Energia solar', 'Ar-condicionado', 'Dedetizadora', 'Limpeza empresarial', 'Manutenção de piscinas', 'Marcenaria',
+]
+
+const prospectLocationOptions = [
+  'Belo Horizonte, MG', 'Savassi, Belo Horizonte', 'Funcionários, Belo Horizonte', 'Lourdes, Belo Horizonte',
+  'Buritis, Belo Horizonte', 'Pampulha, Belo Horizonte', 'Barreiro, Belo Horizonte', 'Venda Nova, Belo Horizonte',
+  'Região metropolitana de Belo Horizonte', 'Contagem, MG', 'Betim, MG', 'Nova Lima, MG', 'Uberlândia, MG', 'Juiz de Fora, MG',
+  'São Paulo, SP', 'Moema, São Paulo', 'Vila Mariana, São Paulo', 'Pinheiros, São Paulo', 'Tatuapé, São Paulo',
+  'Santana, São Paulo', 'Itaquera, São Paulo', 'Região metropolitana de São Paulo', 'Guarulhos, SP', 'Osasco, SP',
+  'Santo André, SP', 'São Bernardo do Campo, SP', 'Campinas, SP', 'Ribeirão Preto, SP', 'Sorocaba, SP', 'Santos, SP',
+  'Rio de Janeiro, RJ', 'Barra da Tijuca, Rio de Janeiro', 'Tijuca, Rio de Janeiro', 'Botafogo, Rio de Janeiro',
+  'Copacabana, Rio de Janeiro', 'Campo Grande, Rio de Janeiro', 'Niterói, RJ', 'Nova Iguaçu, RJ',
+  'Curitiba, PR', 'Batel, Curitiba', 'Água Verde, Curitiba', 'São José dos Pinhais, PR', 'Londrina, PR', 'Maringá, PR',
+  'Porto Alegre, RS', 'Caxias do Sul, RS', 'Florianópolis, SC', 'Joinville, SC', 'Blumenau, SC',
+  'Brasília, DF', 'Asa Norte, Brasília', 'Asa Sul, Brasília', 'Taguatinga, DF', 'Águas Claras, DF', 'Goiânia, GO',
+  'Salvador, BA', 'Feira de Santana, BA', 'Recife, PE', 'Olinda, PE', 'Fortaleza, CE', 'Manaus, AM',
+  'Vitória, ES', 'Vila Velha, ES', 'Belém, PA', 'São Luís, MA', 'Natal, RN', 'João Pessoa, PB', 'Maceió, AL',
+]
+
 function ProspectView({ isBusy, onRun, setStatus, setBusy }: { isBusy: boolean; onRun: () => Promise<void>; setStatus: (value: string) => void; setBusy: (value: boolean) => void }) {
-  const [step, setStep] = useState<'product' | 'audience' | 'scale' | 'preview' | 'done'>('product')
-  const [product, setProduct] = useState('')
-  const [audience, setAudience] = useState('')
+  const [step, setStep] = useState<'target' | 'scale' | 'preview' | 'done'>('target')
+  const [niche, setNiche] = useState('')
+  const [location, setLocation] = useState('')
   const [scale, setScale] = useState<'moderada' | 'grande' | 'ampla' | ''>('')
-  const [productInput, setProductInput] = useState('')
-  const [audienceInput, setAudienceInput] = useState('')
+  const [nicheInput, setNicheInput] = useState('')
+  const [locationInput, setLocationInput] = useState('')
   const [preview, setPreview] = useState<StrategyPreview | null>(null)
   const [run, setRun] = useState<SearchRun | null>(null)
   const [error, setError] = useState('')
@@ -731,17 +932,12 @@ function ProspectView({ isBusy, onRun, setStatus, setBusy }: { isBusy: boolean; 
     { value: 'ampla',    label: '~120 leads', sub: 'Ampla' },
   ]
 
-  function confirmProduct() {
-    const v = productInput.trim()
-    if (!v) return
-    setProduct(v)
-    setStep('audience')
-  }
-
-  function confirmAudience() {
-    const v = audienceInput.trim()
-    if (!v) return
-    setAudience(v)
+  function confirmTarget() {
+    const targetNiche = nicheInput.trim()
+    const targetLocation = locationInput.trim()
+    if (!targetNiche || !targetLocation) return
+    setNiche(targetNiche)
+    setLocation(targetLocation)
     setStep('scale')
   }
 
@@ -752,10 +948,9 @@ function ProspectView({ isBusy, onRun, setStatus, setBusy }: { isBusy: boolean; 
     setBusy(true)
     setStatus('Montando plano de prospecção...')
     try {
-      const prompt = `Quero vender ${product} para ${audience}`
       const data = await api<{ preview: StrategyPreview }>('/api/prospect/preview', {
         method: 'POST',
-        body: JSON.stringify({ prompt, product, scale: s }),
+        body: JSON.stringify({ niche, region: location, scale: s }),
       })
       setPreview(data.preview)
       setStatus('Plano pronto.')
@@ -789,8 +984,8 @@ function ProspectView({ isBusy, onRun, setStatus, setBusy }: { isBusy: boolean; 
   }
 
   function restart() {
-    setStep('product')
-    setProduct(''); setAudience(''); setScale(''); setProductInput(''); setAudienceInput('')
+    setStep('target')
+    setNiche(''); setLocation(''); setScale(''); setNicheInput(''); setLocationInput('')
     setPreview(null); setRun(null); setError('')
   }
 
@@ -799,57 +994,60 @@ function ProspectView({ isBusy, onRun, setStatus, setBusy }: { isBusy: boolean; 
       <div className="wizard-header">
         <span className="wizard-title">Nova campanha</span>
         <div className="wizard-steps">
-          {['product', 'audience', 'scale', 'preview', 'done'].map((s, i) => (
-            <div key={s} className={`wizard-step-dot${step === s ? ' active' : ''} ${['product','audience','scale','preview','done'].indexOf(step) > i ? 'done' : ''}`} />
+          {['target', 'scale', 'preview', 'done'].map((s, i) => (
+            <div key={s} className={`wizard-step-dot${step === s ? ' active' : ''} ${['target','scale','preview','done'].indexOf(step) > i ? 'done' : ''}`} />
           ))}
         </div>
       </div>
 
       <div className="wizard-body">
 
-        {/* ── P1: Produto ── */}
-        <div className={`wz-block${step === 'product' ? ' visible' : ' past'}`}>
-          <div className="wz-q">O que você vende?</div>
-          {step === 'product' ? (
-            <div className="wz-answer-row">
+        {/* ── P1: Nicho e localidade ── */}
+        <div className={`wz-block${step === 'target' ? ' visible' : ' past'}`}>
+          <div className="wz-q">Defina a pesquisa</div>
+          {step === 'target' ? (
+            <div className="wz-target-form">
+              <label className="wz-target-field">
+                <span>Nicho do negócio</span>
               <input
-                className="wz-input"
-                placeholder="Ex: Landing page, Chatbot, CRM..."
-                value={productInput}
-                onChange={(e) => setProductInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && confirmProduct()}
+                className="wz-input wz-mega-select"
+                list="prospect-niche-options"
+                placeholder="Pesquise ou selecione um nicho específico..."
+                value={nicheInput}
+                onChange={(e) => setNicheInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && confirmTarget()}
                 autoFocus
               />
-              <button className="wz-btn" type="button" onClick={confirmProduct} disabled={!productInput.trim()}>→</button>
+                <datalist id="prospect-niche-options">
+                  {prospectNicheOptions.map((option) => <option value={option} key={option} />)}
+                </datalist>
+                <small>{prospectNicheOptions.length} sugestões prontas ou digite um nicho personalizado.</small>
+              </label>
+              <label className="wz-target-field">
+                <span>Localidade</span>
+                <input
+                  className="wz-input wz-mega-select"
+                  list="prospect-location-options"
+                  placeholder="Pesquise bairro, cidade ou região..."
+                  value={locationInput}
+                  onChange={(e) => setLocationInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && confirmTarget()}
+                />
+                <datalist id="prospect-location-options">
+                  {prospectLocationOptions.map((option) => <option value={option} key={option} />)}
+                </datalist>
+                <small>{prospectLocationOptions.length} localidades prontas ou digite qualquer bairro, cidade ou região.</small>
+              </label>
+              <button className="wz-target-submit" type="button" onClick={confirmTarget} disabled={!nicheInput.trim() || !locationInput.trim()}>
+                Definir busca
+              </button>
             </div>
           ) : (
-            <div className="wz-answer-given">{product}</div>
+            <div className="wz-answer-given">{niche} em {location}</div>
           )}
         </div>
 
-        {/* ── P2: Público ── */}
-        {(step === 'audience' || ['scale','preview','done'].includes(step)) && (
-          <div className={`wz-block${step === 'audience' ? ' visible' : ' past'}`}>
-            <div className="wz-q">Para quem e onde?</div>
-            {step === 'audience' ? (
-              <div className="wz-answer-row">
-                <input
-                  className="wz-input"
-                  placeholder="Ex: clínicas odontológicas em BH sem site"
-                  value={audienceInput}
-                  onChange={(e) => setAudienceInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && confirmAudience()}
-                  autoFocus
-                />
-                <button className="wz-btn" type="button" onClick={confirmAudience} disabled={!audienceInput.trim()}>→</button>
-              </div>
-            ) : (
-              <div className="wz-answer-given">{audience}</div>
-            )}
-          </div>
-        )}
-
-        {/* ── P3: Volume ── */}
+        {/* ── P2: Volume ── */}
         {(step === 'scale' || ['preview','done'].includes(step)) && (
           <div className={`wz-block${step === 'scale' ? ' visible' : ' past'}`}>
             <div className="wz-q">Quantos leads?</div>
@@ -881,9 +1079,8 @@ function ProspectView({ isBusy, onRun, setStatus, setBusy }: { isBusy: boolean; 
           <div className="wz-block visible">
             <div className="wz-q">Plano gerado</div>
             <div className="wz-plan">
-              <div className="wz-plan-row"><span>Produto</span><b>{preview.strategy.product}</b></div>
-              <div className="wz-plan-row"><span>Público</span><b>{preview.strategy.audience}</b></div>
-              <div className="wz-plan-row"><span>Região</span><b>{preview.strategy.region}</b></div>
+              <div className="wz-plan-row"><span>Nicho</span><b>{preview.strategy.audience}</b></div>
+              <div className="wz-plan-row"><span>Localidade</span><b>{preview.strategy.region}</b></div>
               <div className="wz-plan-row"><span>Leads estimados</span><b>{preview.strategy.estimatedUsefulRange}</b></div>
               <div className="wz-plan-row"><span>Chamadas API</span><b>{preview.strategy.estimatedApiCalls}</b></div>
             </div>
@@ -1957,7 +2154,7 @@ function CrmView({
                   className="primary-button"
                   type="button"
                   onClick={sendMessage}
-                  disabled={isSending || !approach.trim() || !selected.lead.phone}
+                  disabled={isSending || !waConnected || !approach.trim() || !selected.lead.phone}
                   title={!waConnected ? 'Conecte o WhatsApp na aba WhatsApp primeiro' : ''}
                 >
                   {isSending ? <><span className="send-spinner" />Enviando…</> : 'Enviar via WhatsApp'}
@@ -2314,7 +2511,7 @@ function ProjectsBoardView() {
   )
 }
 
-function AdminView({ dashboard, runs }: { dashboard: Dashboard | null; assignments?: Assignment[]; runs: SearchRun[] }) {
+function AdminView({ dashboard, runs, onPipelineRefresh }: { dashboard: Dashboard | null; assignments?: Assignment[]; runs: SearchRun[]; onPipelineRefresh: () => Promise<void> }) {
   const [adminTab, setAdminTab] = useState<'users' | 'trojan' | 'sites' | 'projects' | 'wolf'>('users')
   const [users, setUsers] = useState<AdminUser[]>([])
   const [form, setForm] = useState({ name: '', username: '', password: '', role: 'Comercial' })
@@ -2459,7 +2656,7 @@ function AdminView({ dashboard, runs }: { dashboard: Dashboard | null; assignmen
       {adminTab === 'projects' && <ProjectsBoardView />}
       {adminTab === 'trojan' && <TrojanView />}
       {adminTab === 'sites' && <SiteHealthView />}
-      {adminTab === 'wolf' && <WolfView />}
+      {adminTab === 'wolf' && <WolfView onPipelineRefresh={onPipelineRefresh} />}
 
       {adminTab === 'users' && (
     <section className="content-grid" style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
@@ -2630,56 +2827,95 @@ type WolfCron = {
   lastRunStats: { sent: number; failed: number; total: number; ranAt: string } | null
 }
 
-function WolfView() {
+type WolfPreview = {
+  eligibleCount: number
+  scheduledCount: number
+  messages: { leadId: string; company: string; city: string; phone: string; text: string }[]
+}
+
+function WolfView({ onPipelineRefresh }: { onPipelineRefresh: () => Promise<void> }) {
   const [brokenLeads, setBrokenLeads] = useState<WolfLead[]>([])
   const [approvedLeads, setApprovedLeads] = useState<Assignment[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [tab, setTab] = useState<'broken' | 'approved' | 'auto'>('broken')
   const [selectedLead, setSelectedLead] = useState<{ type: 'broken'; lead: WolfLead } | { type: 'approved'; assignment: Assignment } | null>(null)
   const [message, setMessage] = useState('')
   const [sending, setSending] = useState(false)
   const [sendStatus, setSendStatus] = useState<{ ok: boolean; msg: string } | null>(null)
   const [wolfCron, setWolfCron] = useState<WolfCron | null>(null)
+  const [wolfPreview, setWolfPreview] = useState<WolfPreview | null>(null)
   const [cronSaving, setCronSaving] = useState(false)
   const [runningNow, setRunningNow] = useState(false)
+  const [autoStatus, setAutoStatus] = useState<{ ok: boolean; msg: string } | null>(null)
 
   async function fetchData() {
+    setLoadError('')
     try {
       const [wolfData, cronData] = await Promise.all([
         api<{ brokenLeads: WolfLead[]; approvedLeads: Assignment[] }>('/api/admin/wolf'),
-        api<{ wolfCron: WolfCron }>('/api/admin/wolf/cron'),
+        api<{ wolfCron: WolfCron; preview: WolfPreview; running?: boolean }>('/api/admin/wolf/cron'),
       ])
+      if (!Array.isArray(wolfData.brokenLeads) || !Array.isArray(wolfData.approvedLeads) || !cronData.wolfCron || !Array.isArray(cronData.preview?.messages)) {
+        throw new Error('Modulo Lobo indisponivel no servidor. Atualize o backend.')
+      }
       setBrokenLeads(wolfData.brokenLeads)
       setApprovedLeads(wolfData.approvedLeads)
       setWolfCron(cronData.wolfCron)
-    } catch { /* ignore */ } finally {
+      setWolfPreview(cronData.preview)
+      setRunningNow(Boolean(cronData.running))
+      if (runningNow && !cronData.running) await onPipelineRefresh()
+    } catch (err) {
+      setBrokenLeads([])
+      setApprovedLeads([])
+      setLoadError(err instanceof Error ? err.message : 'Erro ao carregar os dados do Lobo.')
+    } finally {
       setLoading(false)
     }
   }
 
   async function toggleCron(enabled: boolean) {
     setCronSaving(true)
+    setAutoStatus(null)
     try {
-      const data = await api<{ wolfCron: WolfCron }>('/api/admin/wolf/cron', { method: 'POST', body: JSON.stringify({ enabled }) })
+      const data = await api<{ wolfCron: WolfCron; preview: WolfPreview; running?: boolean }>('/api/admin/wolf/cron', { method: 'POST', body: JSON.stringify({ enabled }) })
       setWolfCron(data.wolfCron)
-    } catch { /* ignore */ } finally {
+      setWolfPreview(data.preview)
+      setRunningNow(Boolean(data.running))
+    } catch (err) {
+      setAutoStatus({ ok: false, msg: err instanceof Error ? err.message : 'Erro ao atualizar agendamento.' })
+    } finally {
       setCronSaving(false)
     }
   }
 
   async function runNow() {
-    if (!confirm('Disparar Lobo Automático agora? Vai enviar até 50 mensagens com delay de segurança.')) return
+    const quantity = wolfPreview?.scheduledCount || 0
+    if (!quantity) {
+      setAutoStatus({ ok: false, msg: 'Nenhuma mensagem pronta para disparo.' })
+      return
+    }
+    if (!confirm(`Disparar manualmente as ${quantity} mensagens exibidas agora? O envio usa delay de segurança.`)) return
     setRunningNow(true)
+    setAutoStatus(null)
     try {
-      const data = await api<{ wolfCron: WolfCron }>('/api/admin/wolf/cron/run-now', { method: 'POST' })
+      const data = await api<{ wolfCron: WolfCron; preview: WolfPreview; running?: boolean }>('/api/admin/wolf/cron/run-now', { method: 'POST' })
       setWolfCron(data.wolfCron)
-      await fetchData()
-    } catch { /* ignore */ } finally {
+      setWolfPreview(data.preview)
+      setRunningNow(Boolean(data.running))
+      setAutoStatus({ ok: true, msg: 'Disparo manual iniciado. A fila será atualizada quando terminar.' })
+    } catch (err) {
       setRunningNow(false)
+      setAutoStatus({ ok: false, msg: err instanceof Error ? err.message : 'Erro no disparo manual.' })
     }
   }
 
   useEffect(() => { fetchData() }, [])
+  useEffect(() => {
+    if (!runningNow) return
+    const timer = window.setInterval(() => { fetchData() }, 5000)
+    return () => window.clearInterval(timer)
+  }, [runningNow])
 
   function buildTemplate(lead: Lead, health?: SiteHealth): string {
     const first = lead.name.split(' ')[0]
@@ -2723,6 +2959,7 @@ function WolfView() {
       await api('/api/admin/wolf/send', { method: 'POST', body: JSON.stringify({ leadId, text: message }) })
       setSendStatus({ ok: true, msg: 'Mensagem enviada! Lead movido para "Mensagem enviada".' })
       await fetchData()
+      await onPipelineRefresh()
     } catch (err) {
       setSendStatus({ ok: false, msg: err instanceof Error ? err.message : 'Erro ao enviar.' })
     } finally {
@@ -2763,8 +3000,9 @@ function WolfView() {
         </div>
 
         {loading && <div className="wolf-loading">Carregando…</div>}
+        {loadError && !loading && <div className="wolf-error">{loadError}</div>}
 
-        {tab === 'broken' && !loading && (
+        {tab === 'broken' && !loading && !loadError && (
           <div className="wolf-list">
             {brokenLeads.length === 0 && (
               <div className="wolf-empty">
@@ -2800,7 +3038,7 @@ function WolfView() {
           </div>
         )}
 
-        {tab === 'approved' && !loading && (
+        {tab === 'approved' && !loading && !loadError && (
           <div className="wolf-list">
             {approvedLeads.length === 0 && <div className="wolf-empty"><p>Nenhum lead aprovado com telefone.</p></div>}
             {approvedLeads.map((a) => {
@@ -2836,13 +3074,13 @@ function WolfView() {
           <div className="wolf-auto-panel">
             <div className="wolf-auto-header">
               <span className="wolf-auto-title">⚡ Lobo Automático</span>
-              <span className="wolf-auto-sub">Disparo às 9h todo dia · {wolfCron?.dailyLimit || 50} leads · delay 3–8s</span>
+              <span className="wolf-auto-sub">Disparo às 09h (Brasília) · até {wolfCron?.dailyLimit || 50} mensagens · intervalo de segurança de 3–8s</span>
             </div>
 
             <div className="wolf-auto-toggle-row">
               <div>
                 <div className="wolf-auto-toggle-label">{wolfCron?.enabled ? 'Ativado' : 'Desativado'}</div>
-                <div className="wolf-auto-toggle-hint">{wolfCron?.enabled ? 'Vai disparar amanhã às 9h automaticamente.' : 'Ligue para ativar o disparo diário.'}</div>
+                <div className="wolf-auto-toggle-hint">{wolfCron?.enabled ? 'O lote abaixo será enviado automaticamente às 09h.' : 'Ative para enviar às 09h ou dispare manualmente agora.'}</div>
               </div>
               <button
                 type="button"
@@ -2854,20 +3092,31 @@ function WolfView() {
               </button>
             </div>
 
-            <div className="wolf-auto-templates">
-              <div className="wolf-auto-section-title">5 abordagens rotativas (nível Lobo)</div>
-              {[
-                'Oi [nome]! Toda semana você perde clientes pra concorrente que aparece no Google e você não. Resolvo isso em 48h. Quer ver?',
-                '[nome], fiz uma análise da [empresa] em [cidade]. Tá deixando dinheiro na mesa todo dia sem presença digital forte. 2 minutos?',
-                'Oi [nome]! [categoria] em [cidade] que não aparece online perde clientes pra quem aparece. Posso mudar isso essa semana.',
-                '[nome], a [empresa] tem potencial pra dobrar os contatos online. Já fiz isso pra vários [categoria] em [cidade]. Bora conversar?',
-                'Oi [nome]! Seu concorrente já capta clientes online enquanto a [empresa] depende só de indicação. Tenho solução rápida. Interesse?',
-              ].map((t, i) => (
-                <div key={i} className="wolf-template-preview">
-                  <span className="wolf-template-num">{i + 1}</span>
-                  <span>{t}</span>
+            <div className="wolf-auto-preview">
+              <div className="wolf-auto-preview-heading">
+                <div>
+                  <div className="wolf-auto-section-title">Mensagens do próximo disparo das 09h</div>
+                  <p>Prévia real do WhatsApp: empresa, telefone e texto exatamente como serão enviados.</p>
                 </div>
-              ))}
+                <strong>{wolfPreview?.scheduledCount || 0} / {wolfPreview?.eligibleCount || 0}</strong>
+              </div>
+              {!wolfPreview?.messages.length && (
+                <div className="wolf-auto-empty">Nenhum lead elegível com telefone para envio.</div>
+              )}
+              <div className="wolf-auto-message-list">
+                {wolfPreview?.messages.map((planned, i) => (
+                  <article className="wolf-auto-message" key={planned.leadId}>
+                    <div className="wolf-auto-message-head">
+                      <span className="wolf-template-num">{i + 1}</span>
+                      <div>
+                        <strong>{planned.company}</strong>
+                        <small>{[planned.city, planned.phone].filter(Boolean).join(' · ')}</small>
+                      </div>
+                    </div>
+                    <p>{planned.text}</p>
+                  </article>
+                ))}
+              </div>
             </div>
 
             <div className="wolf-auto-actions">
@@ -2875,11 +3124,13 @@ function WolfView() {
                 type="button"
                 className="primary-button"
                 onClick={runNow}
-                disabled={runningNow}
+                disabled={runningNow || !wolfPreview?.scheduledCount}
               >
-                {runningNow ? <><span className="send-spinner" />Disparando…</> : '▶ Disparar agora'}
+                {runningNow ? <><span className="send-spinner" />Disparo em andamento…</> : 'Disparar mensagens agora'}
               </button>
+              <span>Executa manualmente o mesmo lote mostrado acima, mesmo com o automático desligado.</span>
             </div>
+            {autoStatus && <p className={autoStatus.ok ? 'form-success' : 'form-error'}>{autoStatus.msg}</p>}
 
             {wolfCron?.lastRunStats && (
               <div className="wolf-auto-last-run">
@@ -2967,21 +3218,36 @@ function SiteHealthView() {
   const [scanned, setScanned] = useState(false)
   const [error, setError] = useState('')
   const [filter, setFilter] = useState<'all' | 'error' | 'slow' | 'ok'>('all')
-  const [cityFilter, setCityFilter] = useState('')
+  const [searchForm, setSearchForm] = useState({
+    term: '',
+    category: '',
+    city: '',
+    minScore: '',
+    requirePhone: true,
+    limit: '50',
+  })
+  const [scanSummary, setScanSummary] = useState<{ matched: number; scanned: number } | null>(null)
 
   async function scan() {
     setScanning(true)
     setError('')
     setResults([])
     setScanned(false)
+    setScanSummary(null)
     try {
-      const body: Record<string, string> = {}
-      if (cityFilter.trim()) body.city = cityFilter.trim()
-      const data = await api<{ results: SiteCheckResult[]; total: number }>('/api/admin/site-health', {
+      const data = await api<{ results: SiteCheckResult[]; total: number; matched: number }>('/api/admin/site-health', {
         method: 'POST',
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          term: searchForm.term.trim(),
+          category: searchForm.category.trim(),
+          city: searchForm.city.trim(),
+          minScore: searchForm.minScore ? Number(searchForm.minScore) : undefined,
+          requirePhone: searchForm.requirePhone,
+          limit: Number(searchForm.limit),
+        }),
       })
       setResults(data.results)
+      setScanSummary({ matched: data.matched, scanned: data.total })
       setScanned(true)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao escanear.')
@@ -3004,34 +3270,91 @@ function SiteHealthView() {
   return (
     <section className="content-grid">
       <article className="panel wide">
-        <PanelTitle title="Scanner de Sites" description="Verifica sites dos leads: status HTTP, tempo de resposta, erros 404 e timeouts." />
+        <PanelTitle title="Scanner de Sites Quebrados" description="Escolha o público da base para verificar sites fora do ar, com erro ou lentos e alimentar o Lobo de Wall Street." />
         {error && <p className="form-error">{error}</p>}
-        <div className="site-health-toolbar">
-          <input
-            className="kb-select"
-            style={{ width: 200 }}
-            placeholder="Filtrar por cidade (ex: Belo Horizonte)"
-            value={cityFilter}
-            onChange={(e) => setCityFilter(e.target.value)}
-            disabled={scanning}
-          />
-          <button className="btn-primary" type="button" onClick={scan} disabled={scanning}>
-            {scanning ? 'Escaneando…' : scanned ? 'Escanear novamente' : 'Iniciar Scan'}
-          </button>
-          {scanning && <span className="site-health-hint">Verificando sites{cityFilter ? ` em ${cityFilter}` : ''}…</span>}
-          {scanned && !scanning && (
+        <div className="site-health-search-card">
+          <div className="site-health-search-grid">
+            <label>Empresa ou termo
+              <input
+                placeholder="Ex: academia, dental, clínica"
+                value={searchForm.term}
+                onChange={(e) => setSearchForm((form) => ({ ...form, term: e.target.value }))}
+                disabled={scanning}
+              />
+            </label>
+            <label>Segmento / categoria
+              <input
+                placeholder="Ex: Academia, Salão de beleza"
+                value={searchForm.category}
+                onChange={(e) => setSearchForm((form) => ({ ...form, category: e.target.value }))}
+                disabled={scanning}
+              />
+            </label>
+            <label>Cidade / região
+              <input
+                placeholder="Ex: Belo Horizonte"
+                value={searchForm.city}
+                onChange={(e) => setSearchForm((form) => ({ ...form, city: e.target.value }))}
+                disabled={scanning}
+              />
+            </label>
+            <label>Score mínimo
+              <input
+                type="number"
+                min="0"
+                max="100"
+                placeholder="Ex: 70"
+                value={searchForm.minScore}
+                onChange={(e) => setSearchForm((form) => ({ ...form, minScore: e.target.value }))}
+                disabled={scanning}
+              />
+            </label>
+            <label>Sites por scan
+              <select value={searchForm.limit} onChange={(e) => setSearchForm((form) => ({ ...form, limit: e.target.value }))} disabled={scanning}>
+                <option value="25">25 (rápido)</option>
+                <option value="50">50</option>
+                <option value="100">100 (máximo)</option>
+              </select>
+            </label>
+            <label className="site-health-check">
+              <input
+                type="checkbox"
+                checked={searchForm.requirePhone}
+                onChange={(e) => setSearchForm((form) => ({ ...form, requirePhone: e.target.checked }))}
+                disabled={scanning}
+              />
+              Somente leads com WhatsApp
+            </label>
+          </div>
+          <div className="site-health-toolbar">
+            <button className="btn-primary" type="button" onClick={scan} disabled={scanning}>
+              {scanning ? 'Verificando sites…' : scanned ? 'Executar nova busca' : 'Buscar sites quebrados'}
+            </button>
+            <span className="site-health-hint">
+              {scanning
+                ? 'Aguarde: a verificação rápida evita travar a requisição.'
+                : 'Analisa somente leads já encontrados que possuem site cadastrado.'}
+            </span>
+          </div>
+        </div>
+        {scanned && !scanning && (
+          <div className="site-health-results-toolbar">
+            <span className="site-health-summary">
+              {scanSummary?.scanned || 0} verificados de {scanSummary?.matched || 0} compatíveis com os filtros
+            </span>
             <div className="site-health-filters">
               <button type="button" className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>Todos ({results.length})</button>
               <button type="button" className={`sh-filter-err${filter === 'error' ? ' active' : ''}`} onClick={() => setFilter('error')}>Erros/404 ({errorCount})</button>
               <button type="button" className={`sh-filter-slow${filter === 'slow' ? ' active' : ''}`} onClick={() => setFilter('slow')}>Lentos &gt;3s ({slowCount})</button>
               <button type="button" className={`sh-filter-ok${filter === 'ok' ? ' active' : ''}`} onClick={() => setFilter('ok')}>OK ({okCount})</button>
             </div>
-          )}
-        </div>
+          </div>
+        )}
         {scanned && filtered.length > 0 && (
           <div className="site-health-table">
             <div className="site-health-head">
-              <span>Lead</span>
+              <span>Empresa</span>
+              <span>Segmento / cidade</span>
               <span>URL</span>
               <span>Status</span>
               <span>Tempo</span>
@@ -3042,6 +3365,7 @@ function SiteHealthView() {
               return (
                 <div key={r.id} className={`site-health-row ${isErr ? 'sh-row-err' : isSlow ? 'sh-row-slow' : 'sh-row-ok'}`}>
                   <span className="sh-name">{r.name}</span>
+                  <span className="sh-meta">{[r.category, r.city].filter(Boolean).join(' · ')}</span>
                   <a className="sh-url" href={r.url} target="_blank" rel="noreferrer">{r.url}</a>
                   <span className="sh-status">
                     {r.error
@@ -3055,7 +3379,7 @@ function SiteHealthView() {
             })}
           </div>
         )}
-        {scanned && filtered.length === 0 && <Empty text="Nenhum resultado nessa categoria." />}
+        {scanned && filtered.length === 0 && <Empty text="Nenhum site encontrado para este filtro." />}
       </article>
     </section>
   )

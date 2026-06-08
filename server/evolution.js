@@ -42,6 +42,31 @@ export async function sendWhatsAppText({ number, text, instanceName }) {
   }
 }
 
+export async function checkWhatsAppNumber({ number, instanceName }) {
+  const config = getEvolutionConfig()
+  const cleanNumber = String(number || '').replace(/\D/g, '')
+  const response = await fetch(`${config.baseUrl}/chat/whatsappNumbers/${instanceName}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: config.apiKey,
+    },
+    body: JSON.stringify({ numbers: [cleanNumber] }),
+  })
+
+  const data = await response.json().catch(() => [])
+  if (!response.ok) {
+    throw new Error(data?.message || `Evolution number check falhou: ${response.status}`)
+  }
+
+  const checked = Array.isArray(data) ? data[0] : null
+  return {
+    number: cleanNumber,
+    exists: Boolean(checked?.exists),
+    jid: checked?.jid || null,
+  }
+}
+
 export async function fetchInstances() {
   const config = getEvolutionConfig()
   const response = await fetch(`${config.baseUrl}/instance/fetchInstances`, {

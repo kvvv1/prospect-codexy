@@ -221,17 +221,17 @@ function getNeighborhoods(region) {
   return []
 }
 
-export function buildProspectingPreview({ prompt = '', preset = '', presets: selectedPresetIds = [], product = '', region = '', quantity, scale = 'grande', criteria = {} }, store, user) {
+export function buildProspectingPreview({ prompt = '', niche = '', preset = '', presets: selectedPresetIds = [], product = '', region = '', quantity, scale = 'grande', criteria = {} }, store, user) {
   const resolvedQuantity = quantity ?? scaleToQuantity[scale] ?? 80
   const presetIds = selectedPresetIds.length ? selectedPresetIds : (preset ? [preset] : [])
   const activePresets = presetIds.map((id) => presets[id]).filter(Boolean)
   const parsed = parsePrompt(prompt)
   const targetProduct = product !== undefined && product !== null ? product : (activePresets[0]?.product || parsed.product || '')
   const targetRegion = region || parsed.region || 'Belo Horizonte'
-  const targetAudience = (parsed.audience && parsed.audience.length > 2 ? parsed.audience : null) || activePresets.map((p) => p.label).join(', ') || 'negócios locais'
-  const expansion = findExpansion(prompt)
-  const isGenericSearch = !expansion
-  const baseTerms = expansion?.terms || expandGenericAudience(targetAudience)
+  const targetAudience = niche.trim() || (parsed.audience && parsed.audience.length > 2 ? parsed.audience : null) || activePresets.map((p) => p.label).join(', ') || 'negócios locais'
+  const expansion = findExpansion(targetAudience)
+  const isGenericSearch = false
+  const baseTerms = [targetAudience]
   const desiredQuantity = clamp(Number(resolvedQuantity) || 80, 10, 200)
 
   // keywords geradas como um profissional buscaria no Google Maps:
@@ -682,9 +682,9 @@ function scoreLead(lead, strategy, alreadyActive, alreadyKnown) {
   const warnings = []
 
   // cidade — penalidade dura se a cidade não bate com a região alvo
-  const leadCity = normalizeKey(lead.city || '')
+  const leadLocation = normalizeKey(`${lead.city || ''} ${lead.address || ''}`)
   const targetRegion = normalizeKey(strategy.region || '')
-  const cityMatch = targetRegion.split(' ').some((part) => part.length > 3 && leadCity.includes(part)) || leadCity === targetRegion
+  const cityMatch = targetRegion.split(' ').some((part) => part.length > 3 && leadLocation.includes(part)) || leadLocation === targetRegion
   if (!cityMatch) {
     score -= 30
     warnings.push(`Cidade "${lead.city}" não corresponde à região alvo "${strategy.region}".`)
@@ -702,7 +702,9 @@ function scoreLead(lead, strategy, alreadyActive, alreadyKnown) {
       .flatMap((kw) => normalizeKey(kw.split(' em ')[0]).split(' '))
       .concat(normalizeKey(strategy.audience).split(' '))
       .filter((word) => word.length >= 3)
-    categoryMatch = [...new Set(searchTermWords)].some((word) => categoryText.includes(word))
+    const genericNicheWords = new Set(['empresa', 'empresas', 'negocio', 'negocios', 'clinica', 'clinicas', 'academia', 'academias', 'loja', 'lojas', 'servico', 'servicos'])
+    const specificWords = [...new Set(searchTermWords)].filter((word) => !genericNicheWords.has(word))
+    categoryMatch = (specificWords.length ? specificWords : [...new Set(searchTermWords)]).some((word) => categoryText.includes(word))
     if (categoryMatch) addScore(15, 'Categoria compatível com a intenção da prospecção.')
     else {
       score -= 25
